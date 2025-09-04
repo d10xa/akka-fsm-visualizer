@@ -14,8 +14,6 @@ object FsmVisualizerApp {
   private def setupUI(): Unit = {
     val fileInput = document.getElementById("fileInput").asInstanceOf[dom.HTMLInputElement]
     val codeTextarea = document.getElementById("codeInput").asInstanceOf[dom.HTMLTextAreaElement]
-    val analyzeButton = document.getElementById("analyzeButton").asInstanceOf[dom.HTMLButtonElement]
-    val clearButton = document.getElementById("clearButton").asInstanceOf[dom.HTMLButtonElement]
     val copyButton = document.getElementById("copyButton").asInstanceOf[dom.HTMLButtonElement]
     val errorDiv = document.getElementById("error").asInstanceOf[dom.HTMLDivElement]
     val mermaidOutput = document.getElementById("mermaidOutput").asInstanceOf[dom.HTMLTextAreaElement]
@@ -32,21 +30,21 @@ object FsmVisualizerApp {
         reader.onload = { (_: dom.Event) =>
           codeTextarea.value = reader.result.asInstanceOf[String]
           clearError(errorDiv)
+          analyzeCode(codeTextarea.value, mermaidOutput, errorDiv)
         }
         reader.readAsText(file)
       }
     })
     
-    // Analyze button handler
-    analyzeButton.addEventListener("click", { (_: dom.Event) =>
-      analyzeCode(codeTextarea.value, mermaidOutput, errorDiv)
-    })
-    
-    // Clear button handler
-    clearButton.addEventListener("click", { (_: dom.Event) =>
-      codeTextarea.value = ""
-      mermaidOutput.value = ""
-      clearError(errorDiv)
+    // Auto-analyze on code change
+    codeTextarea.addEventListener("input", { (_: dom.Event) =>
+      val code = codeTextarea.value
+      if (code.trim.nonEmpty) {
+        analyzeCode(code, mermaidOutput, errorDiv)
+      } else {
+        mermaidOutput.value = ""
+        clearError(errorDiv)
+      }
     })
     
     // Copy button handler
