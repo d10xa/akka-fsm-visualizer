@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Akka FSM to Mermaid Converter</title>
+    <link rel="stylesheet" href="style.css">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>🚀 Akka FSM → Mermaid Converter</h1>
+            <p>Convert your Akka FSM code to Mermaid state diagrams</p>
+        </header>
+
+        <div class="controls">
+            <div class="file-input-wrapper">
+                <input type="file" id="fileInput" accept=".scala" />
+                <label for="fileInput">📁 Upload Scala File</label>
+            </div>
+            <button id="analyzeButton" class="btn btn-primary">🔍 Analyze</button>
+            <button id="clearButton" class="btn btn-secondary">🗑️ Clear</button>
+        </div>
+
+        <div class="content">
+            <div class="code-panel">
+                <h3>Scala Code</h3>
+                <textarea id="codeInput" placeholder="Paste your Akka FSM code here..."></textarea>
+            </div>
+            
+            <div class="mermaid-panel">
+                <div class="panel-header">
+                    <h3>Mermaid Diagram</h3>
+                    <button id="copyButton" class="btn btn-small">📋 Copy</button>
+                </div>
+                <textarea id="mermaidOutput" readonly placeholder="Mermaid diagram will appear here..."></textarea>
+                <div class="mermaid-help">
+                    <p>💡 Copy the Mermaid code and paste it into:</p>
+                    <ul>
+                        <li><a href="https://mermaid.live/" target="_blank">Mermaid Live Editor</a></li>
+                        <li><a href="https://github.com" target="_blank">GitHub</a> (in markdown files)</li>
+                        <li><a href="https://docs.gitlab.com/ee/user/markdown.html#mermaid" target="_blank">GitLab</a></li>
+                        <li>Or any tool that supports Mermaid diagrams</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div id="error" class="error"></div>
+
+        <footer>
+            <div class="legend">
+                <h4>Generated Diagram Features:</h4>
+                <div class="legend-items">
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: #45b7d1;"></div>
+                        <span>Regular States</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: #4ecdc4;"></div>
+                        <span>Recovery States</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="legend-color" style="background-color: #ff6b6b;"></div>
+                        <span>Failed/Stop States</span>
+                    </div>
+                </div>
+            </div>
+        </footer>
+    </div>
+
+    <script type="text/javascript" src="akka-fsm-visualizer-fastopt.js"></script>
+</body>
+</html>
