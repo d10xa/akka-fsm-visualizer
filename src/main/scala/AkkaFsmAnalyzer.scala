@@ -18,37 +18,62 @@ object AkkaFsmAnalyzer {
     }
   }
 
-  private def eval(t: Tree): List[Link] = t match {
+  private def eval(t: Tree): List[Link] = {
+    // Collect all function definitions first
+    val functions = collectFunctionDefinitions(t)
+    evalWithFunctions(t, functions)
+  }
+  
+  private def collectFunctionDefinitions(t: Tree): Map[String, Tree] = {
+    def collect(tree: Tree): Map[String, Tree] = tree match {
+      case Defn.Def.Initial(_, Term.Name(name), _, _, _, body) =>
+        Map(name -> body) ++ tree.children.flatMap(collect).toMap
+      case _ =>
+        tree.children.flatMap(collect).toMap
+    }
+    collect(t)
+  }
+  
+  private def evalWithFunctions(t: Tree, functions: Map[String, Tree]): List[Link] = t match {
     case Term.Apply.Initial(q"when(..$exprs)", terms) =>
-      terms.flatMap(evalWhen).map(to => Link(exprs.head.toString(), to, None))
+      terms.flatMap(term => evalWhen(term, functions)).map(to => Link(exprs.head.toString(), to, None))
       
     case Defn.Def.Initial(_, Term.Name("recoverStateDecision"), _, _, _, body) =>
-      evalWhen(body).map(to => 
+      evalWhen(body, functions).map(to => 
         Link("State.RecoverSelf", to, Some("recovery"))
       )
       
     case t: Tree =>
-      t.children.flatMap(eval)
+      t.children.flatMap(tree => evalWithFunctions(tree, functions))
   }
 
-  private def evalWhen(t: Tree): List[String] = t match {
+  private def evalWhen(t: Tree, functions: Map[String, Tree]): List[String] = t match {
     case s @ Term.Select(Term.Name("State"), _: Term.Name) =>
       List(s.toString())
+      
+    case q"goto(..$args)" =>
+      args.headOption.map(_.toString()).toList
       
     case q"stopSuccess()" =>
       List("stop")
       
     case Term.Apply.Initial(
         Term.Select(Term.Name("Target"), Term.Name("enter")),
-        Term.ArgClause(
-          List(select @ Term.Select(Term.Name("State"), _: Term.Name), _),
-          None
-        )
-      ) =>
-      List(select.toString())
+        args
+      ) if args.headOption.exists(_.isInstanceOf[Term.Select]) =>
+      args.collectFirst {
+        case select @ Term.Select(Term.Name("State"), _: Term.Name) => select.toString()
+      }.toList
+    
+    // Handle function calls - recursively analyze the function body
+    case Term.Apply.Initial(Term.Name(funcName), _) if functions.contains(funcName) =>
+      evalWhen(functions(funcName), functions)
+      
+    case Term.Apply.Initial(Term.Select(_, Term.Name(funcName)), _) if functions.contains(funcName) =>
+      evalWhen(functions(funcName), functions)
       
     case t: Tree =>
-      t.children.flatMap(evalWhen)
+      t.children.flatMap(child => evalWhen(child, functions))
   }
 
   private def linksToMermaid(links: List[Link]): String = {

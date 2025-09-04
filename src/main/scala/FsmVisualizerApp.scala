@@ -67,87 +67,130 @@ object FsmVisualizerApp {
   }
   
   private def loadExampleCode(textarea: dom.HTMLTextAreaElement): Unit = {
-    val exampleCode = """import akka.actor.{Actor, ActorRef, FSM, Props}
+    val exampleCode = """import akka.actor.{Actor, FSM, Props}
       |import scala.concurrent.duration._
       |
       |// События
-      |sealed trait ProcessingEvent
-      |case object StartProcessing extends ProcessingEvent
-      |case object ProcessComplete extends ProcessingEvent
-      |case object ProcessFailed extends ProcessingEvent
-      |case object Retry extends ProcessingEvent
-      |case object Reset extends ProcessingEvent
-      |case object Stop extends ProcessingEvent
-      |case object ProcessStopped extends ProcessingEvent
+      |sealed trait OrderEvent
+      |case object PlaceOrder extends OrderEvent
+      |case object PaymentReceived extends OrderEvent
+      |case object PaymentFailed extends OrderEvent
+      |case object ItemsReserved extends OrderEvent
+      |case object OutOfStock extends OrderEvent
+      |case object OrderShipped extends OrderEvent
+      |case object OrderDelivered extends OrderEvent
+      |case object OrderCancelled extends OrderEvent
+      |case object RefundIssued extends OrderEvent
       |
       |// Состояния
-      |sealed trait ProcessingState
+      |sealed trait OrderState
       |object State {
-      |  case object Idle extends ProcessingState
-      |  case object Processing extends ProcessingState
-      |  case object Complete extends ProcessingState
-      |  case object Failed extends ProcessingState
-      |  case object Stopping extends ProcessingState
-      |  case object RecoverSelf extends ProcessingState
+      |  case object WaitingForOrder extends OrderState
+      |  case object PaymentPending extends OrderState
+      |  case object PaymentFailed extends OrderState
+      |  case object ReservingItems extends OrderState
+      |  case object ReadyToShip extends OrderState
+      |  case object Shipped extends OrderState
+      |  case object Delivered extends OrderState
+      |  case object Cancelled extends OrderState
+      |  case object Refunded extends OrderState
       |}
       |
-      |// Данные состояния
-      |sealed trait ProcessingData
-      |case object EmptyData extends ProcessingData
-      |case class ProcessingInfo(startTime: Long) extends ProcessingData
-      |case class ErrorData(reason: String) extends ProcessingData
-      |case object RecoveryData extends ProcessingData
-      |case object InitialData extends ProcessingData
+      |// Данные
+      |sealed trait OrderData
+      |case object NoData extends OrderData
+      |case class OrderInfo(orderId: String, amount: Double) extends OrderData
       |
-      |class ProcessingFSM extends Actor with FSM[ProcessingState, ProcessingData] {
+      |class OrderProcessingFSM extends Actor with FSM[OrderState, OrderData] {
       |
-      |  when(State.Idle) {
-      |    case Event(StartProcessing, _) =>
-      |      goto(State.Processing)
-      |    case Event(Stop, _) =>
-      |      stopSuccess()
+      |  when(State.WaitingForOrder) {
+      |    case Event(PlaceOrder, _) =>
+      |      goto(State.PaymentPending) using OrderInfo("ORDER-123", 99.99)
       |  }
       |
-      |  when(State.Processing) {
-      |    case Event(ProcessComplete, _) =>
-      |      goto(State.Complete)
-      |    case Event(ProcessFailed, _) =>
-      |      goto(State.Failed)
-      |    case Event(Stop, _) =>
-      |      goto(State.Stopping)
+      |  when(State.PaymentPending) {
+      |    case Event(PaymentReceived, orderInfo) =>
+      |      goto(State.ReservingItems) using orderInfo
+      |      
+      |    case Event(PaymentFailed, orderInfo) =>
+      |      handlePaymentFailure(orderInfo)
       |  }
       |
-      |  when(State.Complete) {
-      |    case Event(Reset, _) =>
-      |      goto(State.Idle)
+      |  when(State.PaymentFailed) {
+      |    case Event(PaymentReceived, orderInfo) =>
+      |      goto(State.ReservingItems) using orderInfo
+      |      
+      |    case Event(OrderCancelled, _) =>
+      |      goto(State.Cancelled) using NoData
       |  }
       |
-      |  when(State.Failed) {
-      |    case Event(Retry, _) =>
-      |      goto(State.Processing)
-      |    case Event(Reset, _) =>
-      |      goto(State.Idle)
+      |  when(State.ReservingItems) {
+      |    case Event(ItemsReserved, orderInfo) =>
+      |      goto(State.ReadyToShip) using orderInfo
+      |      
+      |    case Event(OutOfStock, orderInfo) =>
+      |      handleOutOfStock(orderInfo)
       |  }
       |
-      |  when(State.Stopping) {
-      |    case Event(ProcessStopped, _) =>
-      |      stopSuccess()
+      |  when(State.ReadyToShip) {
+      |    case Event(OrderShipped, orderInfo) =>
+      |      goto(State.Shipped) using orderInfo
+      |      
+      |    case Event(OrderCancelled, orderInfo) =>
+      |      processRefund(orderInfo)
       |  }
       |
-      |  def recoverStateDecision(reason: String): State = {
-      |    reason match {
-      |      case "network_error" => Target.enter(State.Idle, InitialData)
-      |      case "critical_error" => Target.enter(State.Failed, ErrorData(reason))
-      |      case _ => Target.enter(State.Processing, RecoveryData)
+      |  when(State.Shipped) {
+      |    case Event(OrderDelivered, orderInfo) =>
+      |      goto(State.Delivered) using orderInfo
+      |      
+      |    case Event(OrderCancelled, orderInfo) =>
+      |      processRefund(orderInfo)
+      |  }
+      |
+      |  when(State.Delivered) {
+      |    case Event(OrderCancelled, orderInfo) =>
+      |      processRefund(orderInfo)
+      |  }
+      |
+      |  when(State.Cancelled) {
+      |    case Event(RefundIssued, _) =>
+      |      goto(State.Refunded) using NoData
+      |  }
+      |
+      |  when(State.Refunded) {
+      |    case Event(PlaceOrder, _) =>
+      |      goto(State.PaymentPending) using OrderInfo("ORDER-NEW", 149.99)
+      |  }
+      |
+      |  // Вспомогательные функции с переходами состояний
+      |  def handlePaymentFailure(orderInfo: OrderInfo): State = {
+      |    if (orderInfo.amount > 100.0) {
+      |      goto(State.PaymentFailed) using orderInfo
+      |    } else {
+      |      goto(State.Cancelled) using NoData
       |    }
       |  }
       |
-      |  startWith(State.Idle, EmptyData)
-      |  initialize()
-      |}
+      |  def handleOutOfStock(orderInfo: OrderInfo): State = {
+      |    findAlternatives(orderInfo)
+      |  }
       |
-      |object Target {
-      |  def enter(state: ProcessingState, data: ProcessingData): State = state
+      |  def findAlternatives(orderInfo: OrderInfo): State = {
+      |    orderInfo.amount match {
+      |      case amount if amount > 50.0 =>
+      |        goto(State.Cancelled) using orderInfo
+      |      case _ =>
+      |        goto(State.PaymentFailed) using orderInfo
+      |    }
+      |  }
+      |
+      |  def processRefund(orderInfo: OrderInfo): State = {
+      |    goto(State.Cancelled) using orderInfo
+      |  }
+      |
+      |  startWith(State.WaitingForOrder, NoData)
+      |  initialize()
       |}""".stripMargin
     
     textarea.value = exampleCode
