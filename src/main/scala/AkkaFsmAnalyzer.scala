@@ -21,7 +21,9 @@ object AkkaFsmAnalyzer {
   private def eval(t: Tree): List[Link] = {
     // Collect all function definitions first
     val functions = collectFunctionDefinitions(t)
-    evalWithFunctions(t, functions)
+    // Find all state objects (objects containing case objects extending some state trait)
+    val stateObjects = collectStateObjects(t)
+    evalWithFunctions(t, functions, stateObjects)
   }
   
   private def collectFunctionDefinitions(t: Tree): Map[String, Tree] = {
@@ -34,21 +36,43 @@ object AkkaFsmAnalyzer {
     collect(t)
   }
   
-  private def evalWithFunctions(t: Tree, functions: Map[String, Tree]): List[Link] = t match {
+  private def collectStateObjects(t: Tree): Set[String] = {
+    def collect(tree: Tree): Set[String] = tree match {
+      case Defn.Object.Initial(_, Term.Name(name), _) if containsStateDefinitions(tree) =>
+        Set(name) ++ tree.children.flatMap(collect)
+      case _ =>
+        tree.children.flatMap(collect).toSet
+    }
+    collect(t)
+  }
+  
+  private def containsStateDefinitions(tree: Tree): Boolean = {
+    def hasStatePattern(t: Tree): Boolean = t match {
+      case Defn.Object.Initial(_, _, _) => 
+        t.children.exists(hasStatePattern)
+      case _ => 
+        t.toString().contains("extends") && 
+        (t.toString().contains("State") || t.toString().contains("Event"))
+    }
+    hasStatePattern(tree)
+  }
+  
+  private def evalWithFunctions(t: Tree, functions: Map[String, Tree], stateObjects: Set[String]): List[Link] = t match {
     case Term.Apply.Initial(q"when(..$exprs)", terms) =>
-      terms.flatMap(term => evalWhen(term, functions)).map(to => Link(exprs.head.toString(), to, None))
+      terms.flatMap(term => evalWhen(term, functions, stateObjects)).map(to => Link(exprs.head.toString(), to, None))
       
     case Defn.Def.Initial(_, Term.Name("recoverStateDecision"), _, _, _, body) =>
-      evalWhen(body, functions).map(to => 
-        Link("State.RecoverSelf", to, Some("recovery"))
+      evalWhen(body, functions, stateObjects).map(to => 
+        Link(s"${stateObjects.headOption.getOrElse("State")}.RecoverSelf", to, Some("recovery"))
       )
       
     case t: Tree =>
-      t.children.flatMap(tree => evalWithFunctions(tree, functions))
+      t.children.flatMap(tree => evalWithFunctions(tree, functions, stateObjects))
   }
 
-  private def evalWhen(t: Tree, functions: Map[String, Tree]): List[String] = t match {
-    case s @ Term.Select(Term.Name("State"), _: Term.Name) =>
+  private def evalWhen(t: Tree, functions: Map[String, Tree], stateObjects: Set[String]): List[String] = t match {
+    // Match any state object, not just "State"
+    case s @ Term.Select(Term.Name(objName), _: Term.Name) if stateObjects.contains(objName) =>
       List(s.toString())
       
     case q"goto(..$args)" =>
@@ -62,18 +86,18 @@ object AkkaFsmAnalyzer {
         args
       ) if args.headOption.exists(_.isInstanceOf[Term.Select]) =>
       args.collectFirst {
-        case select @ Term.Select(Term.Name("State"), _: Term.Name) => select.toString()
+        case select @ Term.Select(Term.Name(objName), _: Term.Name) if stateObjects.contains(objName) => select.toString()
       }.toList
     
     // Handle function calls - recursively analyze the function body
     case Term.Apply.Initial(Term.Name(funcName), _) if functions.contains(funcName) =>
-      evalWhen(functions(funcName), functions)
+      evalWhen(functions(funcName), functions, stateObjects)
       
     case Term.Apply.Initial(Term.Select(_, Term.Name(funcName)), _) if functions.contains(funcName) =>
-      evalWhen(functions(funcName), functions)
+      evalWhen(functions(funcName), functions, stateObjects)
       
     case t: Tree =>
-      t.children.flatMap(child => evalWhen(child, functions))
+      t.children.flatMap(child => evalWhen(child, functions, stateObjects))
   }
 
   private def linksToMermaid(links: List[Link]): String = {
@@ -90,9 +114,10 @@ object AkkaFsmAnalyzer {
     // Get all unique states
     val allStates = links.flatMap(link => List(link.from, link.to)).distinct
     
-    // Add initial state if we have an Idle state
-    if (allStates.contains("State.Idle")) {
-      sb.append("    [*] --> State.Idle\n")
+    // Add initial state if we have an Idle state (from any state object)
+    val idleState = allStates.find(_.endsWith(".Idle"))
+    idleState.foreach { idle =>
+      sb.append(s"    [*] --> $idle\n")
     }
     
     // Add all transitions
@@ -140,7 +165,16 @@ object AkkaFsmAnalyzer {
   }
   
   private def cleanStateName(state: String): String = {
-    // Remove "State." prefix for cleaner display
-    state.replace("State.", "").replace(".", "_")
+    // Remove any state object prefix for cleaner display (e.g., "State." or "OrderStates.")
+    if (state.contains(".")) {
+      val parts = state.split("\\.")
+      if (parts.length >= 2) {
+        parts.drop(1).mkString("_")
+      } else {
+        state.replace(".", "_")
+      }
+    } else {
+      state
+    }
   }
 }

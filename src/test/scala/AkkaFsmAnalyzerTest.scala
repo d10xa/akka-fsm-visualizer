@@ -178,4 +178,110 @@ class AkkaFsmAnalyzerTest extends FunSuite {
     val errorMessage = result.left.getOrElse("")
     assert(errorMessage.contains("Parse error"))
   }
+
+  test("parse FSM with custom state object name") {
+    val code = """
+      |object OrderStates {
+      |  case object WaitingForOrder extends OrderState
+      |  case object PaymentPending extends OrderState
+      |  case object Complete extends OrderState
+      |}
+      |
+      |class CustomOrderFSM extends FSM[OrderState, Data] {
+      |  when(OrderStates.WaitingForOrder) {
+      |    case Event(PlaceOrder, _) => goto(OrderStates.PaymentPending)
+      |  }
+      |  when(OrderStates.PaymentPending) {
+      |    case Event(PaymentComplete, _) => goto(OrderStates.Complete)
+      |  }
+      |}
+    """.stripMargin
+
+    val result = AkkaFsmAnalyzer.parseScalaCode(code)
+    assert(result.isRight)
+    
+    val mermaidCode = result.getOrElse("")
+    assert(mermaidCode.contains("stateDiagram-v2"))
+    assert(mermaidCode.contains("WaitingForOrder --> PaymentPending"))
+    assert(mermaidCode.contains("PaymentPending --> Complete"))
+  }
+
+  test("parse FSM with multiple state objects") {
+    val code = """
+      |object ProcessStates {
+      |  case object Idle extends ProcessState
+      |  case object Running extends ProcessState
+      |}
+      |
+      |object ErrorStates {
+      |  case object Failed extends ProcessState
+      |  case object Recovering extends ProcessState
+      |}
+      |
+      |class MultiFSM extends FSM[ProcessState, Data] {
+      |  when(ProcessStates.Idle) {
+      |    case Event(Start, _) => goto(ProcessStates.Running)
+      |  }
+      |  when(ProcessStates.Running) {
+      |    case Event(Error, _) => goto(ErrorStates.Failed)
+      |  }
+      |  when(ErrorStates.Failed) {
+      |    case Event(Recover, _) => goto(ErrorStates.Recovering)
+      |  }
+      |  when(ErrorStates.Recovering) {
+      |    case Event(Complete, _) => goto(ProcessStates.Idle)
+      |  }
+      |}
+    """.stripMargin
+
+    val result = AkkaFsmAnalyzer.parseScalaCode(code)
+    assert(result.isRight)
+    
+    val mermaidCode = result.getOrElse("")
+    assert(mermaidCode.contains("Idle --> Running"))
+    assert(mermaidCode.contains("Running --> Failed"))
+    assert(mermaidCode.contains("Failed --> Recovering"))
+    assert(mermaidCode.contains("Recovering --> Idle"))
+  }
+
+  test("parse FSM with custom state object and nested functions") {
+    val code = """
+      |object MyStates {
+      |  case object Start extends MyState
+      |  case object Processing extends MyState
+      |  case object Failed extends MyState
+      |  case object Complete extends MyState
+      |}
+      |
+      |class CustomFSM extends FSM[MyState, Data] {
+      |  when(MyStates.Start) {
+      |    case Event(Begin, _) => handleBegin()
+      |  }
+      |  
+      |  def handleBegin(): State = {
+      |    goto(MyStates.Processing)
+      |  }
+      |  
+      |  when(MyStates.Processing) {
+      |    case Event(Fail, _) => handleFailure()
+      |  }
+      |  
+      |  def handleFailure(): State = {
+      |    checkCanRecover() match {
+      |      case true => goto(MyStates.Processing) 
+      |      case false => goto(MyStates.Failed)
+      |    }
+      |  }
+      |  
+      |  def checkCanRecover(): Boolean = true
+      |}
+    """.stripMargin
+
+    val result = AkkaFsmAnalyzer.parseScalaCode(code)
+    assert(result.isRight)
+    
+    val mermaidCode = result.getOrElse("")
+    assert(mermaidCode.contains("Start --> Processing"))
+    assert(mermaidCode.contains("Processing --> Failed"))
+  }
 }
