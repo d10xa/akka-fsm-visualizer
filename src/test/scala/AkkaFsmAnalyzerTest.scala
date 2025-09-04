@@ -163,7 +163,7 @@ class AkkaFsmAnalyzerTest extends FunSuite {
     assert(result.isRight)
     
     val mermaidCode = result.getOrElse("")
-    assert(mermaidCode.contains("EmptyFSM"))
+    assert(mermaidCode.contains("NoTransitions"))
     assert(mermaidCode.contains("No FSM transitions found"))
   }
 
@@ -284,4 +284,223 @@ class AkkaFsmAnalyzerTest extends FunSuite {
     assert(mermaidCode.contains("Start --> Processing"))
     assert(mermaidCode.contains("Processing --> Failed"))
   }
+
+  test("handle large FSM without stack overflow") {
+    // Create a large FSM with many states and deep nesting
+    val largeCode = generateLargeFSMCode(100) // 100 states
+    
+    val result = AkkaFsmAnalyzer.parseScalaCode(largeCode)
+    if (result.isLeft) {
+      println(s"Parse error: ${result.left.get}")
+    } else {
+      val mermaidCode = result.getOrElse("")
+      println(s"Generated mermaid code length: ${mermaidCode.length}")
+      println(s"First 500 chars: ${mermaidCode.take(500)}")
+    }
+    
+    assert(result.isRight, s"Should parse large FSM without stack overflow, but got: ${result.left.getOrElse("")}")
+    
+    val mermaidCode = result.getOrElse("")
+    assert(mermaidCode.contains("stateDiagram-v2"))
+    // More flexible assertions since state names might be cleaned
+    assert(mermaidCode.contains("State0") || mermaidCode.contains("State_0"))
+    assert(mermaidCode.contains("Complete"))
+  }
+
+  test("handle deeply nested function calls") {
+    val deepCode = generateDeeplyNestedCode(20) // 20 levels deep
+    
+    val result = AkkaFsmAnalyzer.parseScalaCode(deepCode)
+    assert(result.isRight, s"Should parse deeply nested functions without stack overflow, but got: ${result.left.getOrElse("")}")
+    
+    val mermaidCode = result.getOrElse("")
+    assert(mermaidCode.contains("Start --> Processing"))
+    assert(mermaidCode.contains("Processing --> Complete"))
+  }
+
+  private def generateLargeFSMCode(numStates: Int): String = {
+    val states = (0 until numStates).map(i => s"  case object State$i extends ProcessingState").mkString("\n")
+    
+    val whenBlocks = (0 until numStates).map { i =>
+      val nextState = if (i == numStates - 1) "Complete" else s"State${i + 1}"
+      s"""  when(State.State$i) {
+         |    case Event(Next, _) => processNext($i)
+         |    case Event(Fail, _) => goto(State.Failed)
+         |  }""".stripMargin
+    }.mkString("\n\n")
+    
+    val processNextCases = (0 until numStates).map { i =>
+      val nextState = if (i == numStates - 1) "Complete" else s"State${i + 1}"
+      s"      case $i => handleState(State.$nextState)"
+    }.mkString("\n")
+    
+    s"""object State {
+       |$states
+       |  case object Complete extends ProcessingState
+       |  case object Failed extends ProcessingState
+       |}
+       |
+       |class LargeFSM extends FSM[ProcessingState, Data] {
+       |$whenBlocks
+       |
+       |  when(State.Complete) {
+       |    case Event(Reset, _) => goto(State.State0)
+       |  }
+       |
+       |  when(State.Failed) {
+       |    case Event(Reset, _) => goto(State.State0)
+       |  }
+       |
+       |  def processNext(stateNum: Int): State = {
+       |    stateNum match {
+       |$processNextCases
+       |      case _ => goto(State.Failed)
+       |    }
+       |  }
+       |
+       |  def handleState(state: ProcessingState): State = {
+       |    validateState(state) match {
+       |      case true => goto(state)
+       |      case false => goto(State.Failed)
+       |    }
+       |  }
+       |
+       |  def validateState(state: ProcessingState): Boolean = true
+       |
+       |  startWith(State.State0, EmptyData)
+       |}""".stripMargin
+  }
+
+  private def generateDeeplyNestedCode(depth: Int): String = {
+    val functions = (1 to depth).map { i =>
+      val nextCall = if (i == depth) "goto(State.Complete)" else s"level${i + 1}()"
+      s"""  def level$i(): State = {
+         |    $nextCall
+         |  }""".stripMargin
+    }.mkString("\n\n")
+    
+    s"""object State {
+       |  case object Start extends ProcessingState
+       |  case object Processing extends ProcessingState
+       |  case object Complete extends ProcessingState
+       |}
+       |
+       |class DeepFSM extends FSM[ProcessingState, Data] {
+       |  when(State.Start) {
+       |    case Event(Begin, _) => goto(State.Processing)
+       |  }
+       |
+       |  when(State.Processing) {
+       |    case Event(Process, _) => level1()
+       |  }
+       |
+       |$functions
+       |
+       |  startWith(State.Start, EmptyData)
+       |}""".stripMargin
+  }
+
+  test("handle infinite loop protection") {
+    // This should not hang the parser
+    val infiniteCode = """
+      |object State {
+      |  case object Start extends ProcessingState
+      |  case object Processing extends ProcessingState
+      |  case object Complete extends ProcessingState
+      |}
+      |
+      |class InfiniteFSM extends FSM[ProcessingState, Data] {
+      |  when(State.Start) {
+      |    case Event(Begin, _) => circularFunction1()
+      |  }
+      |  
+      |  def circularFunction1(): State = {
+      |    circularFunction2()
+      |  }
+      |  
+      |  def circularFunction2(): State = {
+      |    circularFunction1() // This creates a cycle
+      |  }
+      |}
+    """.stripMargin
+
+    val result = AkkaFsmAnalyzer.parseScalaCode(infiniteCode)
+    // Should succeed and show unparsed transitions for problematic parts
+    assert(result.isRight)
+    
+    val mermaidCode = result.getOrElse("")
+    // Should contain either valid transitions or unparsed markers
+    assert(mermaidCode.contains("stateDiagram-v2"))
+  }
+
+  test("generate valid Mermaid syntax with special characters") {
+    val code = """
+      |object States {
+      |  case object NormalState extends ProcessState
+      |  case object AnotherState extends ProcessState
+      |}
+      |
+      |class SpecialFSM extends FSM[ProcessState, Data] {
+      |  when(States.NormalState) {
+      |    case Event(Next, _) => goto(States.AnotherState)
+      |  }
+      |  
+      |  // This function will be unparsed due to complexity
+      |  def complexFunction(): State = {
+      |    val specialName = "state-with@special#chars"
+      |    goto(States.AnotherState)
+      |  }
+      |}
+    """.stripMargin
+
+    val result = AkkaFsmAnalyzer.parseScalaCode(code)
+    assert(result.isRight)
+    
+    val mermaidCode = result.getOrElse("")
+    assert(mermaidCode.contains("stateDiagram-v2"))
+    // Should generate valid Mermaid without syntax errors
+    assert(mermaidCode.contains("NormalState --> AnotherState"))
+  }
+
+  test("handle FSM with only state definitions") {
+    val code = """
+      |import akka.actor.{Actor, FSM, Props}
+      |import scala.concurrent.duration._
+      |
+      |// События
+      |sealed trait OrderEvent
+      |case object PlaceOrder extends OrderEvent
+      |case object PaymentReceived extends OrderEvent
+      |case object PaymentFailed extends OrderEvent
+      |case object ItemsReserved extends OrderEvent
+      |case object OutOfStock extends OrderEvent
+      |case object OrderShipped extends OrderEvent
+      |case object OrderDelivered extends OrderEvent
+      |case object OrderCancelled extends OrderEvent
+      |case object RefundIssued extends OrderEvent
+      |
+      |// Состояния
+      |sealed trait OrderState
+      |object State {
+      |  case object WaitingForOrder extends OrderState
+      |  case object PaymentPending extends OrderState
+      |  case object PaymentFailed extends OrderState
+      |  case object ReservingItems extends OrderState
+      |  case object ReadyToShip extends OrderState
+      |  case object Shipped extends OrderState
+      |  case object Delivered extends OrderState
+      |  case object Cancelled extends OrderState
+      |  case object Refunded extends OrderState
+      |}
+    """.stripMargin
+
+    val result = AkkaFsmAnalyzer.parseScalaCode(code)
+    assert(result.isRight)
+    
+    val mermaidCode = result.getOrElse("")
+    println(s"Generated for state-only FSM: $mermaidCode")
+    assert(mermaidCode.contains("stateDiagram-v2"))
+    assert(mermaidCode.contains("NoTransitions") || mermaidCode.contains("EmptyFSM"))
+  }
+
 }

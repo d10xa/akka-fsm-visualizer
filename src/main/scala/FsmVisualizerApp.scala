@@ -254,11 +254,30 @@ object FsmVisualizerApp {
       mermaidDiv.textContent = mermaidCode
       container.appendChild(mermaidDiv)
       
-      // Render with mermaid.js
+      // Render with mermaid.js using async API
       val mermaid = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].mermaid
-      mermaid.init(scala.scalajs.js.undefined, mermaidDiv)
+      if (scala.scalajs.js.isUndefined(mermaid)) {
+        container.innerHTML = """<div class="error-text">Mermaid.js not loaded</div>"""
+        return
+      }
+      
+      // Try modern API first, fallback to legacy
+      if (!scala.scalajs.js.isUndefined(mermaid.run)) {
+        // Modern async API (v10+)
+        mermaid.run(scala.scalajs.js.Dynamic.literal(
+          nodes = scala.scalajs.js.Array(mermaidDiv)
+        )).`catch`((error: scala.scalajs.js.Any) => {
+          println(s"Mermaid render error: $error")
+          container.innerHTML = s"""<div class="error-text">Failed to render diagram: $error</div>"""
+        })
+      } else {
+        // Legacy API (v9 and below)
+        mermaid.init(scala.scalajs.js.undefined, mermaidDiv)
+      }
+      
     } catch {
       case ex: Exception =>
+        println(s"Exception in renderMermaidDiagram: ${ex.getMessage}")
         container.innerHTML = s"""<div class="error-text">Diagram render error: ${ex.getMessage}</div>"""
     }
   }

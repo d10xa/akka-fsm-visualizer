@@ -13,6 +13,10 @@ object AkkaFsmAnalyzer {
       val links = eval(tree)
       Right(linksToMermaid(links))
     } catch {
+      case ex: StackOverflowError =>
+        Left(s"Stack overflow error: The FSM is too complex or has circular dependencies")
+      case ex: OutOfMemoryError =>
+        Left(s"Out of memory error: The FSM is too large to process")
       case ex: Exception => 
         Left(s"Parse error: ${ex.getMessage}")
     }
@@ -27,23 +31,90 @@ object AkkaFsmAnalyzer {
   }
   
   private def collectFunctionDefinitions(t: Tree): Map[String, Tree] = {
-    def collect(tree: Tree): Map[String, Tree] = tree match {
-      case Defn.Def.Initial(_, Term.Name(name), _, _, _, body) =>
-        Map(name -> body) ++ tree.children.flatMap(collect).toMap
-      case _ =>
-        tree.children.flatMap(collect).toMap
+    val functions = scala.collection.mutable.Map[String, Tree]()
+    val stack = scala.collection.mutable.Stack[Tree]()
+    val visited = scala.collection.mutable.Set[Tree]()
+    val maxIterations = 10000
+    var iterations = 0
+    
+    stack.push(t)
+    
+    while (stack.nonEmpty && iterations < maxIterations) {
+      iterations += 1
+      val current = stack.pop()
+      
+      if (!visited.contains(current)) {
+        visited += current
+      
+        current match {
+          case Defn.Def.Initial(_, Term.Name(name), _, _, _, body) =>
+            functions += (name -> body)
+            // Still process children for nested functions
+            current.children.foreach { child =>
+              if (!visited.contains(child)) {
+                stack.push(child)
+              }
+            }
+            
+          case tree: Tree =>
+            tree.children.foreach { child =>
+              if (!visited.contains(child)) {
+                stack.push(child)
+              }
+            }
+        }
+      }
     }
-    collect(t)
+    
+    // Don't throw exception, just return what we found
+    if (iterations >= maxIterations) {
+      // Log warning but continue
+      println(s"Warning: Maximum iterations exceeded in collectFunctionDefinitions. Partial results returned.")
+    }
+    
+    functions.toMap
   }
   
   private def collectStateObjects(t: Tree): Set[String] = {
-    def collect(tree: Tree): Set[String] = tree match {
-      case Defn.Object.Initial(_, Term.Name(name), _) if containsStateDefinitions(tree) =>
-        Set(name) ++ tree.children.flatMap(collect)
-      case _ =>
-        tree.children.flatMap(collect).toSet
+    val stateObjects = scala.collection.mutable.Set[String]()
+    val stack = scala.collection.mutable.Stack[Tree]()
+    val visited = scala.collection.mutable.Set[Tree]()
+    val maxIterations = 5000
+    var iterations = 0
+    
+    stack.push(t)
+    
+    while (stack.nonEmpty && iterations < maxIterations) {
+      iterations += 1
+      val current = stack.pop()
+      
+      if (!visited.contains(current)) {
+        visited += current
+      
+        current match {
+          case Defn.Object.Initial(_, Term.Name(name), _) if containsStateDefinitions(current) =>
+            stateObjects += name
+            current.children.foreach { child =>
+              if (!visited.contains(child)) {
+                stack.push(child)
+              }
+            }
+            
+          case tree: Tree =>
+            tree.children.foreach { child =>
+              if (!visited.contains(child)) {
+                stack.push(child)
+              }
+            }
+        }
+      }
     }
-    collect(t)
+    
+    if (iterations >= maxIterations) {
+      println(s"Warning: Maximum iterations exceeded in collectStateObjects. Partial results returned.")
+    }
+    
+    stateObjects.toSet
   }
   
   private def containsStateDefinitions(tree: Tree): Boolean = {
@@ -57,55 +128,137 @@ object AkkaFsmAnalyzer {
     hasStatePattern(tree)
   }
   
-  private def evalWithFunctions(t: Tree, functions: Map[String, Tree], stateObjects: Set[String]): List[Link] = t match {
-    case Term.Apply.Initial(q"when(..$exprs)", terms) =>
-      terms.flatMap(term => evalWhen(term, functions, stateObjects)).map(to => Link(exprs.head.toString(), to, None))
+  private def evalWithFunctions(t: Tree, functions: Map[String, Tree], stateObjects: Set[String]): List[Link] = {
+    val links = scala.collection.mutable.ListBuffer[Link]()
+    val stack = scala.collection.mutable.Stack[Tree]()
+    val visited = scala.collection.mutable.Set[Tree]()
+    val maxIterations = 50000 // Safety limit
+    var iterations = 0
+    
+    stack.push(t)
+    
+    while (stack.nonEmpty && iterations < maxIterations) {
+      iterations += 1
+      val current = stack.pop()
       
-    case Defn.Def.Initial(_, Term.Name("recoverStateDecision"), _, _, _, body) =>
-      evalWhen(body, functions, stateObjects).map(to => 
-        Link(s"${stateObjects.headOption.getOrElse("State")}.RecoverSelf", to, Some("recovery"))
-      )
+      // Skip if we've already processed this exact tree node
+      if (!visited.contains(current)) {
+        visited += current
       
-    case t: Tree =>
-      t.children.flatMap(tree => evalWithFunctions(tree, functions, stateObjects))
+        current match {
+          case Term.Apply.Initial(q"when(..$exprs)", terms) =>
+            try {
+              val states = terms.flatMap(term => evalWhen(term, functions, stateObjects))
+              if (states.nonEmpty) {
+                states.foreach(to => links += Link(exprs.head.toString(), to, None))
+              } else {
+                // No transitions found, mark as unparsed
+                links += Link(exprs.head.toString(), "UnparsedTransition", Some("unparsed"))
+              }
+            } catch {
+              case _: Exception =>
+                // Failed to parse this when block, add as unparsed
+                links += Link(exprs.head.toString(), "UnparsedTransition", Some("unparsed"))
+            }
+            
+          case Defn.Def.Initial(_, Term.Name("recoverStateDecision"), _, _, _, body) =>
+            val states = evalWhen(body, functions, stateObjects)
+            states.foreach(to => 
+              links += Link(s"${stateObjects.headOption.getOrElse("State")}.RecoverSelf", to, Some("recovery"))
+            )
+            
+          case tree: Tree =>
+            // Add children to stack for iterative processing, but avoid cycles
+            tree.children.foreach { child =>
+              if (!visited.contains(child)) {
+                stack.push(child)
+              }
+            }
+        }
+      }
+    }
+    
+    if (iterations >= maxIterations) {
+      println(s"Warning: Maximum iterations exceeded in evalWithFunctions. Partial results returned.")
+    }
+    
+    links.toList
   }
 
-  private def evalWhen(t: Tree, functions: Map[String, Tree], stateObjects: Set[String]): List[String] = t match {
-    // Match any state object, not just "State"
-    case s @ Term.Select(Term.Name(objName), _: Term.Name) if stateObjects.contains(objName) =>
-      List(s.toString())
-      
-    case q"goto(..$args)" =>
-      args.headOption.map(_.toString()).toList
-      
-    case q"stopSuccess()" =>
-      List("stop")
-      
-    case Term.Apply.Initial(
-        Term.Select(Term.Name("Target"), Term.Name("enter")),
-        args
-      ) if args.headOption.exists(_.isInstanceOf[Term.Select]) =>
-      args.collectFirst {
-        case select @ Term.Select(Term.Name(objName), _: Term.Name) if stateObjects.contains(objName) => select.toString()
-      }.toList
+  private def evalWhen(t: Tree, functions: Map[String, Tree], stateObjects: Set[String]): List[String] = {
+    val results = scala.collection.mutable.ListBuffer[String]()
+    val stack = scala.collection.mutable.Stack[Tree]()
+    val visited = scala.collection.mutable.Set[Tree]()
+    val maxIterations = 10000 // Smaller limit for evalWhen
+    var iterations = 0
     
-    // Handle function calls - recursively analyze the function body
-    case Term.Apply.Initial(Term.Name(funcName), _) if functions.contains(funcName) =>
-      evalWhen(functions(funcName), functions, stateObjects)
+    stack.push(t)
+    
+    while (stack.nonEmpty && iterations < maxIterations) {
+      iterations += 1
+      val current = stack.pop()
       
-    case Term.Apply.Initial(Term.Select(_, Term.Name(funcName)), _) if functions.contains(funcName) =>
-      evalWhen(functions(funcName), functions, stateObjects)
+      // Skip if we've already processed this exact tree node
+      if (!visited.contains(current)) {
+        visited += current
       
-    case t: Tree =>
-      t.children.flatMap(child => evalWhen(child, functions, stateObjects))
+        current match {
+          // Match any state object, not just "State"
+          case s @ Term.Select(Term.Name(objName), _: Term.Name) if stateObjects.contains(objName) =>
+            results += s.toString()
+            
+          case q"goto(..$args)" =>
+            args.headOption.foreach(arg => results += arg.toString())
+            
+          case q"stopSuccess()" =>
+            results += "stop"
+            
+          case Term.Apply.Initial(
+              Term.Select(Term.Name("Target"), Term.Name("enter")),
+              args
+            ) if args.headOption.exists(_.isInstanceOf[Term.Select]) =>
+            args.collectFirst {
+              case select @ Term.Select(Term.Name(objName), _: Term.Name) if stateObjects.contains(objName) => select.toString()
+            }.foreach(result => results += result)
+          
+          // Handle function calls - add function body to stack, but avoid cycles
+          case Term.Apply.Initial(Term.Name(funcName), _) if functions.contains(funcName) =>
+            val funcBody = functions(funcName)
+            if (!visited.contains(funcBody)) {
+              stack.push(funcBody)
+            }
+            
+          case Term.Apply.Initial(Term.Select(_, Term.Name(funcName)), _) if functions.contains(funcName) =>
+            val funcBody = functions(funcName)
+            if (!visited.contains(funcBody)) {
+              stack.push(funcBody)
+            }
+            
+          case tree: Tree =>
+            // Add children to stack for iterative processing, but avoid cycles
+            tree.children.foreach { child =>
+              if (!visited.contains(child)) {
+                stack.push(child)
+              }
+            }
+        }
+      }
+    }
+    
+    if (iterations >= maxIterations) {
+      println(s"Warning: Maximum iterations exceeded in evalWhen. Partial results returned.")
+    }
+    
+    results.toList
   }
 
   private def linksToMermaid(links: List[Link]): String = {
     if (links.isEmpty) {
       return """stateDiagram-v2
-        |    [*] --> EmptyFSM
-        |    EmptyFSM --> [*]
-        |    note right of EmptyFSM : No FSM transitions found""".stripMargin
+        |    [*] --> NoTransitions
+        |    NoTransitions --> [*]
+        |    note right of NoTransitions : No FSM transitions found
+        |    note right of NoTransitions : Only state definitions detected""".stripMargin
     }
 
     val sb = new StringBuilder()
@@ -117,7 +270,8 @@ object AkkaFsmAnalyzer {
     // Add initial state if we have an Idle state (from any state object)
     val idleState = allStates.find(_.endsWith(".Idle"))
     idleState.foreach { idle =>
-      sb.append(s"    [*] --> $idle\n")
+      val cleanIdle = cleanStateName(idle)
+      sb.append(s"    [*] --> $cleanIdle\n")
     }
     
     // Add all transitions
@@ -128,6 +282,8 @@ object AkkaFsmAnalyzer {
       link.arrow match {
         case Some("recovery") =>
           sb.append(s"    $fromState --> $toState : recovery\n")
+        case Some("unparsed") =>
+          sb.append(s"    $fromState --> $toState : [unparsed]\n")
         case _ =>
           sb.append(s"    $fromState --> $toState\n")
       }
@@ -141,24 +297,38 @@ object AkkaFsmAnalyzer {
     // Add styling for different types of states
     sb.append("\n")
     
-    // Color recovery states
-    allStates.filter(_.contains("Recover")).foreach { state =>
-      val cleanState = cleanStateName(state)
-      sb.append(s"    classDef recovery fill:#4ecdc4\n")
-      sb.append(s"    class $cleanState recovery\n")
-    }
+    // Define CSS classes once
+    val hasRecoveryStates = allStates.exists(_.contains("Recover"))
+    val hasFailedStates = allStates.exists(_.contains("Failed"))
+    val hasStopState = allStates.contains("stop")
+    val hasUnparsedStates = allStates.exists(_.contains("UnparsedTransition"))
     
-    // Color failed states
-    allStates.filter(_.contains("Failed")).foreach { state =>
-      val cleanState = cleanStateName(state)
-      sb.append(s"    classDef failed fill:#ff6b6b\n")
-      sb.append(s"    class $cleanState failed\n")
+    if (hasRecoveryStates) {
+      sb.append("    classDef recovery fill:#4ecdc4\n")
     }
-    
-    // Color stop states
-    if (allStates.contains("stop")) {
+    if (hasFailedStates) {
+      sb.append("    classDef failed fill:#ff6b6b\n")
+    }
+    if (hasStopState) {
       sb.append("    classDef stopState fill:#ff6b6b\n")
-      sb.append("    class stop stopState\n")
+    }
+    if (hasUnparsedStates) {
+      sb.append("    classDef unparsed fill:#ffa500,stroke:#ff6b00,stroke-width:2px,stroke-dasharray:5\n")
+    }
+    
+    // Apply classes to states
+    allStates.foreach { state =>
+      val cleanState = cleanStateName(state)
+      
+      if (state.contains("Recover")) {
+        sb.append(s"    class $cleanState recovery\n")
+      } else if (state.contains("Failed")) {
+        sb.append(s"    class $cleanState failed\n")
+      } else if (state == "stop") {
+        sb.append(s"    class $cleanState stopState\n")
+      } else if (state.contains("UnparsedTransition")) {
+        sb.append(s"    class $cleanState unparsed\n")
+      }
     }
     
     sb.toString()
@@ -166,7 +336,7 @@ object AkkaFsmAnalyzer {
   
   private def cleanStateName(state: String): String = {
     // Remove any state object prefix for cleaner display (e.g., "State." or "OrderStates.")
-    if (state.contains(".")) {
+    val cleaned = if (state.contains(".")) {
       val parts = state.split("\\.")
       if (parts.length >= 2) {
         parts.drop(1).mkString("_")
@@ -176,5 +346,17 @@ object AkkaFsmAnalyzer {
     } else {
       state
     }
+    
+    // Make sure the name is valid for Mermaid
+    // Replace any characters that might cause issues
+    cleaned
+      .replaceAll("[^a-zA-Z0-9_]", "_")  // Replace non-alphanumeric chars with underscore
+      .replaceAll("_{2,}", "_")          // Replace multiple underscores with single
+      .replaceAll("^_+|_+$", "")        // Remove leading/trailing underscores
+      .take(50)                          // Limit length
+      match {
+        case "" => "UnknownState"
+        case name => name
+      }
   }
 }
