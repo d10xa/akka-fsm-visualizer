@@ -15,8 +15,10 @@ object FsmVisualizerApp {
     val fileInput = document.getElementById("fileInput").asInstanceOf[dom.HTMLInputElement]
     val codeTextarea = document.getElementById("codeInput").asInstanceOf[dom.HTMLTextAreaElement]
     val copyButton = document.getElementById("copyButton").asInstanceOf[dom.HTMLButtonElement]
+    val toggleButton = document.getElementById("toggleSource").asInstanceOf[dom.HTMLButtonElement]
     val errorDiv = document.getElementById("error").asInstanceOf[dom.HTMLDivElement]
     val mermaidOutput = document.getElementById("mermaidOutput").asInstanceOf[dom.HTMLTextAreaElement]
+    val diagramContainer = document.getElementById("diagramContainer").asInstanceOf[dom.HTMLDivElement]
     
     // Load example code
     loadExampleCode(codeTextarea)
@@ -30,7 +32,7 @@ object FsmVisualizerApp {
         reader.onload = { (_: dom.Event) =>
           codeTextarea.value = reader.result.asInstanceOf[String]
           clearError(errorDiv)
-          analyzeCode(codeTextarea.value, mermaidOutput, errorDiv)
+          analyzeCode(codeTextarea.value, mermaidOutput, diagramContainer, errorDiv)
         }
         reader.readAsText(file)
       }
@@ -40,10 +42,25 @@ object FsmVisualizerApp {
     codeTextarea.addEventListener("input", { (_: dom.Event) =>
       val code = codeTextarea.value
       if (code.trim.nonEmpty) {
-        analyzeCode(code, mermaidOutput, errorDiv)
+        analyzeCode(code, mermaidOutput, diagramContainer, errorDiv)
       } else {
         mermaidOutput.value = ""
+        diagramContainer.innerHTML = """<div class="placeholder-text">Enter Akka FSM code to see the diagram</div>"""
         clearError(errorDiv)
+      }
+    })
+    
+    // Toggle source view
+    toggleButton.addEventListener("click", { (_: dom.Event) =>
+      val isSourceVisible = mermaidOutput.style.display != "none"
+      if (isSourceVisible) {
+        mermaidOutput.style.display = "none"
+        diagramContainer.style.display = "block"
+        toggleButton.textContent = "Show Code"
+      } else {
+        mermaidOutput.style.display = "block"
+        diagramContainer.style.display = "none"
+        toggleButton.textContent = "Show Diagram"
       }
     })
     
@@ -60,8 +77,15 @@ object FsmVisualizerApp {
       }, 2000)
     })
     
+    // Initialize mermaid
+    dom.window.asInstanceOf[scala.scalajs.js.Dynamic].mermaid.initialize(scala.scalajs.js.Dynamic.literal(
+      startOnLoad = true,
+      theme = "default",
+      securityLevel = "loose"
+    ))
+    
     // Initial analysis with example code
-    analyzeCode(codeTextarea.value, mermaidOutput, errorDiv)
+    analyzeCode(codeTextarea.value, mermaidOutput, diagramContainer, errorDiv)
   }
   
   private def loadExampleCode(textarea: dom.HTMLTextAreaElement): Unit = {
@@ -194,10 +218,11 @@ object FsmVisualizerApp {
     textarea.value = exampleCode
   }
   
-  private def analyzeCode(code: String, outputTextarea: dom.HTMLTextAreaElement, errorDiv: dom.HTMLDivElement): Unit = {
+  private def analyzeCode(code: String, outputTextarea: dom.HTMLTextAreaElement, diagramContainer: dom.HTMLDivElement, errorDiv: dom.HTMLDivElement): Unit = {
     if (code.trim.isEmpty) {
       showError(errorDiv, "Please provide Scala code to analyze")
       outputTextarea.value = ""
+      diagramContainer.innerHTML = """<div class="placeholder-text">Enter Akka FSM code to see the diagram</div>"""
       return
     }
     
@@ -205,10 +230,36 @@ object FsmVisualizerApp {
       case Right(mermaidCode) =>
         clearError(errorDiv)
         outputTextarea.value = mermaidCode
+        renderMermaidDiagram(mermaidCode, diagramContainer)
         
       case Left(error) =>
         showError(errorDiv, error)
         outputTextarea.value = ""
+        diagramContainer.innerHTML = s"""<div class="error-text">Parse Error: $error</div>"""
+    }
+  }
+  
+  private def renderMermaidDiagram(mermaidCode: String, container: dom.HTMLDivElement): Unit = {
+    try {
+      // Clear previous content
+      container.innerHTML = ""
+      
+      // Create a unique ID for this diagram
+      val diagramId = s"mermaid-${System.currentTimeMillis()}"
+      
+      // Create div for mermaid
+      val mermaidDiv = document.createElement("div")
+      mermaidDiv.setAttribute("class", "mermaid")
+      mermaidDiv.setAttribute("id", diagramId)
+      mermaidDiv.textContent = mermaidCode
+      container.appendChild(mermaidDiv)
+      
+      // Render with mermaid.js
+      val mermaid = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].mermaid
+      mermaid.init(scala.scalajs.js.undefined, mermaidDiv)
+    } catch {
+      case ex: Exception =>
+        container.innerHTML = s"""<div class="error-text">Diagram render error: ${ex.getMessage}</div>"""
     }
   }
   

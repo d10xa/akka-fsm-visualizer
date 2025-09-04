@@ -135,6 +135,30 @@ header p {
     font-weight: 500;
 }
 
+.panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.diagram-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.btn-toggle {
+    background: #f8f9fa;
+    color: #333;
+    padding: 6px 12px;
+    font-size: 0.85rem;
+    border: 1px solid #e1e5e9;
+}
+
+.btn-toggle:hover {
+    background: #e9ecef;
+}
+
 #codeInput, #mermaidOutput {
     flex: 1;
     border: 1px solid #e1e5e9;
@@ -158,19 +182,45 @@ header p {
     resize: none;
 }
 
-.help-text {
-    margin-top: 8px;
+.mermaid-source {
+    display: none;
+}
+
+.diagram-display {
+    flex: 1;
+    border: 1px solid #e1e5e9;
+    border-radius: 4px;
+    padding: 20px;
+    background: #fafafa;
+    overflow: auto;
+    min-height: 400px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.placeholder-text {
+    color: #666;
+    font-style: italic;
     text-align: center;
 }
 
-.help-text a {
-    color: #45b7d1;
-    text-decoration: none;
-    font-size: 0.9rem;
+.error-text {
+    color: #ff6b6b;
+    font-weight: 500;
+    text-align: center;
+    padding: 20px;
 }
 
-.help-text a:hover {
-    text-decoration: underline;
+/* Mermaid diagram styling */
+.diagram-display .mermaid {
+    width: 100%;
+    text-align: center;
+}
+
+.diagram-display svg {
+    max-width: 100%;
+    height: auto;
 }
 
 /* Responsive design */

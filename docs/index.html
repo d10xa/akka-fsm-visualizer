@@ -5,6 +5,7 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Akka FSM to Mermaid Converter</title>
     <link rel="stylesheet" href="style.css">
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
 </head>
 <body>
     <div class="container">
@@ -24,17 +25,22 @@
         <div id="error" class="error"></div>
 
         <div class="content">
-            <div class="panel">
+            <div class="panel code-panel">
                 <h3>Scala Code</h3>
                 <textarea id="codeInput" placeholder="Paste your Akka FSM code here..."></textarea>
             </div>
             
-            <div class="panel">
-                <h3>Mermaid Output</h3>
-                <textarea id="mermaidOutput" readonly placeholder="Mermaid diagram will appear here..."></textarea>
-                <div class="help-text">
-                    <a href="https://mermaid.live/" target="_blank">Open in Mermaid Live Editor →</a>
+            <div class="panel diagram-panel">
+                <div class="panel-header">
+                    <h3>FSM Diagram</h3>
+                    <div class="diagram-controls">
+                        <button id="toggleSource" class="btn btn-toggle">Show Code</button>
+                    </div>
                 </div>
+                <div id="diagramContainer" class="diagram-display">
+                    <div class="placeholder-text">Enter Akka FSM code to see the diagram</div>
+                </div>
+                <textarea id="mermaidOutput" class="mermaid-source" readonly placeholder="Mermaid diagram code..."></textarea>
             </div>
         </div>
     </div>
