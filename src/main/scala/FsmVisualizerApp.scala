@@ -12,80 +12,93 @@ object FsmVisualizerApp {
   }
   
   private def setupUI(): Unit = {
-    val fileInput = document.getElementById("fileInput").asInstanceOf[dom.HTMLInputElement]
-    val codeTextarea = document.getElementById("codeInput").asInstanceOf[dom.HTMLTextAreaElement]
-    val copyButton = document.getElementById("copyButton").asInstanceOf[dom.HTMLButtonElement]
-    val toggleButton = document.getElementById("toggleSource").asInstanceOf[dom.HTMLButtonElement]
-    val errorDiv = document.getElementById("error").asInstanceOf[dom.HTMLDivElement]
-    val mermaidOutput = document.getElementById("mermaidOutput").asInstanceOf[dom.HTMLTextAreaElement]
-    val diagramContainer = document.getElementById("diagramContainer").asInstanceOf[dom.HTMLDivElement]
+    val fileInput = Option(document.getElementById("fileInput")).map(_.asInstanceOf[dom.HTMLInputElement])
+    val codeTextarea = Option(document.getElementById("codeInput")).map(_.asInstanceOf[dom.HTMLTextAreaElement])
+    val copyButton = Option(document.getElementById("copyButton")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val toggleButton = Option(document.getElementById("toggleSource")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val errorDiv = Option(document.getElementById("error")).map(_.asInstanceOf[dom.HTMLDivElement])
+    val mermaidOutput = Option(document.getElementById("mermaidOutput")).map(_.asInstanceOf[dom.HTMLTextAreaElement])
+    val diagramContainer = Option(document.getElementById("diagramContainer")).map(_.asInstanceOf[dom.HTMLDivElement])
+    
+    // Check if all required elements are present
+    if (fileInput.isEmpty || codeTextarea.isEmpty || copyButton.isEmpty || toggleButton.isEmpty || 
+        errorDiv.isEmpty || mermaidOutput.isEmpty || diagramContainer.isEmpty) {
+      println("Some DOM elements not found, retrying in 100ms...")
+      dom.window.setTimeout(() => setupUI(), 100)
+      return
+    }
+    
+    // Extract values from Options for cleaner code
+    val fileInputEl = fileInput.get
+    val codeTextareaEl = codeTextarea.get
+    val copyButtonEl = copyButton.get
+    val toggleButtonEl = toggleButton.get
+    val errorDivEl = errorDiv.get
+    val mermaidOutputEl = mermaidOutput.get
+    val diagramContainerEl = diagramContainer.get
     
     // Load example code
-    loadExampleCode(codeTextarea)
+    loadExampleCode(codeTextareaEl)
     
     // File upload handler
-    fileInput.addEventListener("change", { (_: dom.Event) =>
-      val files = fileInput.files
+    fileInputEl.addEventListener("change", { (_: dom.Event) =>
+      val files = fileInputEl.files
       if (files.length > 0) {
         val file = files(0)
         val reader = new dom.FileReader()
         reader.onload = { (_: dom.Event) =>
-          codeTextarea.value = reader.result.asInstanceOf[String]
-          clearError(errorDiv)
-          analyzeCode(codeTextarea.value, mermaidOutput, diagramContainer, errorDiv)
+          codeTextareaEl.value = reader.result.asInstanceOf[String]
+          clearError(errorDivEl)
+          analyzeCode(codeTextareaEl.value, mermaidOutputEl, diagramContainerEl, errorDivEl)
         }
         reader.readAsText(file)
       }
     })
     
     // Auto-analyze on code change
-    codeTextarea.addEventListener("input", { (_: dom.Event) =>
-      val code = codeTextarea.value
+    codeTextareaEl.addEventListener("input", { (_: dom.Event) =>
+      val code = codeTextareaEl.value
       if (code.trim.nonEmpty) {
-        analyzeCode(code, mermaidOutput, diagramContainer, errorDiv)
+        analyzeCode(code, mermaidOutputEl, diagramContainerEl, errorDivEl)
       } else {
-        mermaidOutput.value = ""
-        diagramContainer.innerHTML = """<div class="placeholder-text">Enter Akka FSM code to see the diagram</div>"""
-        clearError(errorDiv)
+        mermaidOutputEl.value = ""
+        diagramContainerEl.innerHTML = """<div class="placeholder-text">Enter Akka FSM code to see the diagram</div>"""
+        clearError(errorDivEl)
       }
     })
     
     // Toggle source view
-    toggleButton.addEventListener("click", { (_: dom.Event) =>
-      val isSourceVisible = mermaidOutput.style.display != "none"
+    toggleButtonEl.addEventListener("click", { (_: dom.Event) =>
+      val isSourceVisible = mermaidOutputEl.style.display != "none"
       if (isSourceVisible) {
-        mermaidOutput.style.display = "none"
-        diagramContainer.style.display = "block"
-        toggleButton.textContent = "Show Code"
+        mermaidOutputEl.style.display = "none"
+        diagramContainerEl.style.display = "block"
+        toggleButtonEl.textContent = "Show Code"
       } else {
-        mermaidOutput.style.display = "block"
-        diagramContainer.style.display = "none"
-        toggleButton.textContent = "Show Diagram"
+        mermaidOutputEl.style.display = "block"
+        diagramContainerEl.style.display = "none"
+        toggleButtonEl.textContent = "Show Diagram"
       }
     })
     
     // Copy button handler
-    copyButton.addEventListener("click", { (_: dom.Event) =>
-      mermaidOutput.select()
+    copyButtonEl.addEventListener("click", { (_: dom.Event) =>
+      mermaidOutputEl.select()
       dom.document.execCommand("copy")
       
       // Show feedback
-      val originalText = copyButton.textContent
-      copyButton.textContent = "✓ Copied!"
+      val originalText = copyButtonEl.textContent
+      copyButtonEl.textContent = "✓ Copied!"
       dom.window.setTimeout(() => {
-        copyButton.textContent = originalText
+        copyButtonEl.textContent = originalText
       }, 2000)
     })
     
-    // Initialize mermaid
-    dom.window.asInstanceOf[scala.scalajs.js.Dynamic].mermaid.initialize(scala.scalajs.js.Dynamic.literal(
-      startOnLoad = true,
-      theme = "default",
-      securityLevel = "loose"
-    ))
+    // Initialize mermaid with retry mechanism
+    initializeMermaid()
     
     // Initial analysis with example code
-    analyzeCode(codeTextarea.value, mermaidOutput, diagramContainer, errorDiv)
+    analyzeCode(codeTextareaEl.value, mermaidOutputEl, diagramContainerEl, errorDivEl)
   }
   
   private def loadExampleCode(textarea: dom.HTMLTextAreaElement): Unit = {
@@ -245,7 +258,7 @@ object FsmVisualizerApp {
       container.innerHTML = ""
       
       // Create a unique ID for this diagram
-      val diagramId = s"mermaid-${System.currentTimeMillis()}"
+      val diagramId = s"mermaid-${System.currentTimeMillis()}-${Math.random().toString.replace(".", "")}"
       
       // Create div for mermaid
       val mermaidDiv = document.createElement("div")
@@ -258,22 +271,50 @@ object FsmVisualizerApp {
       val mermaid = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].mermaid
       if (scala.scalajs.js.isUndefined(mermaid)) {
         container.innerHTML = """<div class="error-text">Mermaid.js not loaded</div>"""
+        initializeMermaid() // Try to reinitialize
         return
       }
       
-      // Try modern API first, fallback to legacy
-      if (!scala.scalajs.js.isUndefined(mermaid.run)) {
-        // Modern async API (v10+)
-        mermaid.run(scala.scalajs.js.Dynamic.literal(
-          nodes = scala.scalajs.js.Array(mermaidDiv)
-        )).`catch`((error: scala.scalajs.js.Any) => {
-          println(s"Mermaid render error: $error")
-          container.innerHTML = s"""<div class="error-text">Failed to render diagram: $error</div>"""
-        })
-      } else {
-        // Legacy API (v9 and below)
-        mermaid.init(scala.scalajs.js.undefined, mermaidDiv)
-      }
+      // Add small delay to ensure DOM is ready
+      dom.window.setTimeout(() => {
+        try {
+          // Try modern API first, fallback to legacy
+          if (!scala.scalajs.js.isUndefined(mermaid.run)) {
+            // Modern async API (v10+)
+            val promise = mermaid.run(scala.scalajs.js.Dynamic.literal(
+              nodes = scala.scalajs.js.Array(mermaidDiv)
+            ))
+            
+            if (!scala.scalajs.js.isUndefined(promise) && !scala.scalajs.js.isUndefined(promise.`catch`)) {
+              promise.`catch`((error: scala.scalajs.js.Any) => {
+                val errorMsg = if (error != null) {
+                  try {
+                    val errorDynamic = error.asInstanceOf[scala.scalajs.js.Dynamic]
+                    if (!scala.scalajs.js.isUndefined(errorDynamic.message)) {
+                      errorDynamic.message.toString
+                    } else {
+                      error.toString
+                    }
+                  } catch {
+                    case _: Exception => error.toString
+                  }
+                } else {
+                  "Unknown error"
+                }
+                println(s"Mermaid render error: $errorMsg")
+                container.innerHTML = s"""<div class="error-text">Failed to render diagram: $errorMsg</div>"""
+              })
+            }
+          } else {
+            // Legacy API (v9 and below)
+            mermaid.init(scala.scalajs.js.undefined, mermaidDiv)
+          }
+        } catch {
+          case ex: Exception =>
+            println(s"Exception in delayed render: ${ex.getMessage}")
+            container.innerHTML = s"""<div class="error-text">Render error: ${ex.getMessage}</div>"""
+        }
+      }, 50)
       
     } catch {
       case ex: Exception =>
@@ -290,5 +331,42 @@ object FsmVisualizerApp {
   private def clearError(errorDiv: dom.HTMLDivElement): Unit = {
     errorDiv.textContent = ""
     errorDiv.style.display = "none"
+  }
+  
+  private def initializeMermaid(retryCount: Int = 0): Unit = {
+    try {
+      val mermaid = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].mermaid
+      if (scala.scalajs.js.isUndefined(mermaid)) {
+        if (retryCount < 10) {
+          println(s"Mermaid not loaded yet, retrying... (attempt ${retryCount + 1})")
+          dom.window.setTimeout(() => initializeMermaid(retryCount + 1), 200)
+        } else {
+          println("Mermaid failed to load after 10 attempts")
+        }
+        return
+      }
+      
+      // Reset mermaid state
+      if (!scala.scalajs.js.isUndefined(mermaid.mermaidAPI) && !scala.scalajs.js.isUndefined(mermaid.mermaidAPI.reset)) {
+        mermaid.mermaidAPI.reset()
+      }
+      
+      mermaid.initialize(scala.scalajs.js.Dynamic.literal(
+        startOnLoad = false,
+        theme = "default",
+        securityLevel = "loose",
+        fontFamily = "arial",
+        deterministicIds = true,
+        maxTextSize = 50000
+      ))
+      
+      println("Mermaid initialized successfully")
+    } catch {
+      case ex: Exception =>
+        println(s"Failed to initialize Mermaid: ${ex.getMessage}")
+        if (retryCount < 5) {
+          dom.window.setTimeout(() => initializeMermaid(retryCount + 1), 500)
+        }
+    }
   }
 }
