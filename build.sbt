@@ -8,7 +8,8 @@ lazy val root = (project in file("."))
     
     libraryDependencies ++= Seq(
       "org.scalameta" %%% "scalameta" % "4.13.9",
-      "org.scala-js" %%% "scalajs-dom" % "2.8.1"
+      "org.scala-js" %%% "scalajs-dom" % "2.8.1",
+      "org.scalameta" %%% "munit" % "1.0.3" % Test
     ),
     // Scala.js configuration
     scalaJSUseMainModuleInitializer := true,
