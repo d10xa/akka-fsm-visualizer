@@ -35,12 +35,28 @@
                     <h3>FSM Diagram</h3>
                     <div class="diagram-controls">
                         <button id="toggleSource" class="btn btn-toggle">Show Code</button>
+                        <button id="exportSvg" class="btn btn-export">Export SVG</button>
+                        <button id="exportPng" class="btn btn-export">Export PNG</button>
+                        <button id="fullscreen" class="btn btn-fullscreen">Fullscreen</button>
                     </div>
                 </div>
                 <div id="diagramContainer" class="diagram-display">
                     <div class="placeholder-text">Enter Akka FSM code to see the diagram</div>
                 </div>
                 <textarea id="mermaidOutput" class="mermaid-source" readonly placeholder="Mermaid diagram code..."></textarea>
+            </div>
+        </div>
+    </div>
+
+    <!-- Fullscreen Modal -->
+    <div id="fullscreenModal" class="fullscreen-modal">
+        <div class="fullscreen-content">
+            <div class="fullscreen-header">
+                <h2>FSM Diagram - Fullscreen View</h2>
+                <button id="closeFullscreen" class="fullscreen-close">Close</button>
+            </div>
+            <div id="fullscreenDiagram" class="fullscreen-diagram">
+                <!-- Diagram content will be cloned here -->
             </div>
         </div>
     </div>

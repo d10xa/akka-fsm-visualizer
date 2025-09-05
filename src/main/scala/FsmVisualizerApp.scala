@@ -1,5 +1,5 @@
 import org.scalajs.dom
-import org.scalajs.dom.document
+import org.scalajs.dom.{document, console}
 import scala.scalajs.js.annotation.JSExportTopLevel
 
 @JSExportTopLevel("FsmVisualizerApp")
@@ -16,6 +16,12 @@ object FsmVisualizerApp {
     val codeTextarea = Option(document.getElementById("codeInput")).map(_.asInstanceOf[dom.HTMLTextAreaElement])
     val copyButton = Option(document.getElementById("copyButton")).map(_.asInstanceOf[dom.HTMLButtonElement])
     val toggleButton = Option(document.getElementById("toggleSource")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val exportSvgButton = Option(document.getElementById("exportSvg")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val exportPngButton = Option(document.getElementById("exportPng")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val fullscreenButton = Option(document.getElementById("fullscreen")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val fullscreenModal = Option(document.getElementById("fullscreenModal")).map(_.asInstanceOf[dom.HTMLDivElement])
+    val closeFullscreenButton = Option(document.getElementById("closeFullscreen")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val fullscreenDiagram = Option(document.getElementById("fullscreenDiagram")).map(_.asInstanceOf[dom.HTMLDivElement])
     val errorDiv = Option(document.getElementById("error")).map(_.asInstanceOf[dom.HTMLDivElement])
     val mermaidOutput = Option(document.getElementById("mermaidOutput")).map(_.asInstanceOf[dom.HTMLTextAreaElement])
     val diagramContainer = Option(document.getElementById("diagramContainer")).map(_.asInstanceOf[dom.HTMLDivElement])
@@ -33,6 +39,12 @@ object FsmVisualizerApp {
     val codeTextareaEl = codeTextarea.get
     val copyButtonEl = copyButton.get
     val toggleButtonEl = toggleButton.get
+    val exportSvgButtonEl = exportSvgButton.get
+    val exportPngButtonEl = exportPngButton.get  
+    val fullscreenButtonEl = fullscreenButton.get
+    val fullscreenModalEl = fullscreenModal.get
+    val closeFullscreenButtonEl = closeFullscreenButton.get
+    val fullscreenDiagramEl = fullscreenDiagram.get
     val errorDivEl = errorDiv.get
     val mermaidOutputEl = mermaidOutput.get
     val diagramContainerEl = diagramContainer.get
@@ -67,6 +79,7 @@ object FsmVisualizerApp {
       }
     })
     
+    
     // Toggle source view
     toggleButtonEl.addEventListener("click", { (_: dom.Event) =>
       val isSourceVisible = mermaidOutputEl.style.display != "none"
@@ -92,6 +105,33 @@ object FsmVisualizerApp {
       dom.window.setTimeout(() => {
         copyButtonEl.textContent = originalText
       }, 2000)
+    })
+    
+    // Export SVG button handler
+    exportSvgButtonEl.addEventListener("click", { (_: dom.Event) =>
+      exportDiagramAsSvg(diagramContainerEl)
+    })
+    
+    // Export PNG button handler
+    exportPngButtonEl.addEventListener("click", { (_: dom.Event) =>
+      exportDiagramAsPng(diagramContainerEl)
+    })
+    
+    // Fullscreen button handler
+    fullscreenButtonEl.addEventListener("click", { (_: dom.Event) =>
+      showFullscreen(diagramContainerEl, fullscreenModalEl, fullscreenDiagramEl)
+    })
+    
+    // Close fullscreen handler
+    closeFullscreenButtonEl.addEventListener("click", { (_: dom.Event) =>
+      hideFullscreen(fullscreenModalEl)
+    })
+    
+    // Close fullscreen on modal background click
+    fullscreenModalEl.addEventListener("click", { (event: dom.Event) =>
+      if (event.target == fullscreenModalEl) {
+        hideFullscreen(fullscreenModalEl)
+      }
     })
     
     // Initialize mermaid with retry mechanism
@@ -165,6 +205,10 @@ object FsmVisualizerApp {
       |      
       |    case Event(OutOfStock, orderInfo) =>
       |      handleOutOfStock(orderInfo)
+      |      
+      |    case Event(PaymentFailed, orderInfo) =>
+      |      // Повторная резервация при проблемах с оплатой - остаемся в том же состоянии
+      |      goto(State.ReservingItems) using orderInfo
       |  }
       |
       |  when(State.ReadyToShip) {
@@ -367,6 +411,102 @@ object FsmVisualizerApp {
         if (retryCount < 5) {
           dom.window.setTimeout(() => initializeMermaid(retryCount + 1), 500)
         }
+    }
+  }
+  
+  private def exportDiagramAsSvg(container: dom.HTMLDivElement): Unit = {
+    try {
+      val svgElement = container.querySelector("svg")
+      if (svgElement != null) {
+        val svgData = new dom.XMLSerializer().serializeToString(svgElement)
+        val svgBlob = new dom.Blob(
+          scala.scalajs.js.Array(svgData), 
+          new dom.BlobPropertyBag {
+            `type` = "image/svg+xml;charset=utf-8"
+          }
+        )
+        val url = dom.URL.createObjectURL(svgBlob)
+        val link = document.createElement("a").asInstanceOf[dom.HTMLAnchorElement]
+        link.href = url
+        link.download = "fsm-diagram.svg"
+        link.click()
+        dom.URL.revokeObjectURL(url)
+      } else {
+        println("No SVG diagram found to export")
+      }
+    } catch {
+      case ex: Exception =>
+        println(s"Failed to export SVG: ${ex.getMessage}")
+    }
+  }
+  
+  private def exportDiagramAsPng(container: dom.HTMLDivElement): Unit = {
+    try {
+      val svgElement = container.querySelector("svg")
+      if (svgElement != null) {
+        val canvas = document.createElement("canvas").asInstanceOf[dom.HTMLCanvasElement]
+        val ctx = canvas.getContext("2d").asInstanceOf[dom.CanvasRenderingContext2D]
+        
+        val svgData = new dom.XMLSerializer().serializeToString(svgElement)
+        val svgBlob = new dom.Blob(
+          scala.scalajs.js.Array(svgData), 
+          new dom.BlobPropertyBag {
+            `type` = "image/svg+xml;charset=utf-8"
+          }
+        )
+        val url = dom.URL.createObjectURL(svgBlob)
+        val img = new dom.Image()
+        
+        img.onload = { (_: dom.Event) =>
+          canvas.width = img.naturalWidth
+          canvas.height = img.naturalHeight
+          ctx.drawImage(img, 0, 0)
+          
+          // Use toDataURL as fallback since toBlob might not be available in all browsers
+          val dataUrl = canvas.toDataURL("image/png")
+          val link = document.createElement("a").asInstanceOf[dom.HTMLAnchorElement]
+          link.href = dataUrl
+          link.download = "fsm-diagram.png"
+          link.click()
+          
+          dom.URL.revokeObjectURL(url)
+        }
+        
+        img.src = url
+      } else {
+        println("No SVG diagram found to export")
+      }
+    } catch {
+      case ex: Exception =>
+        println(s"Failed to export PNG: ${ex.getMessage}")
+    }
+  }
+  
+  private def showFullscreen(container: dom.HTMLDivElement, modal: dom.HTMLDivElement, fullscreenContainer: dom.HTMLDivElement): Unit = {
+    try {
+      // Clone the diagram content
+      val diagramContent = container.cloneNode(true).asInstanceOf[dom.HTMLDivElement]
+      fullscreenContainer.innerHTML = ""
+      fullscreenContainer.appendChild(diagramContent)
+      
+      // Show the modal
+      modal.style.display = "block"
+      
+      // Prevent body scrolling
+      document.body.style.overflow = "hidden"
+    } catch {
+      case ex: Exception =>
+        println(s"Failed to show fullscreen: ${ex.getMessage}")
+    }
+  }
+  
+  private def hideFullscreen(modal: dom.HTMLDivElement): Unit = {
+    try {
+      modal.style.display = "none"
+      document.body.style.overflow = ""
+    } catch {
+      case ex: Exception =>
+        println(s"Failed to hide fullscreen: ${ex.getMessage}")
     }
   }
 }

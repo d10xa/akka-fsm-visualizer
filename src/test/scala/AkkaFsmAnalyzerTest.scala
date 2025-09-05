@@ -503,4 +503,147 @@ class AkkaFsmAnalyzerTest extends FunSuite {
     assert(mermaidCode.contains("NoTransitions") || mermaidCode.contains("EmptyFSM"))
   }
 
+  test("recovery functions should not be hardcoded to specific names") {
+    val code1 = """
+      |object State {
+      |  case object RecoverSelf extends State
+      |  case object Idle extends State
+      |  case object Failed extends State
+      |}
+      |
+      |class RecoveryFSM extends FSM[State, Data] {
+      |  def handleRecoveryScenario(reason: String): State = {
+      |    reason match {
+      |      case "network_error" => Target.enter(State.Idle, InitialData)
+      |      case "critical_error" => Target.enter(State.Failed, ErrorData(reason))
+      |    }
+      |  }
+      |}
+    """.stripMargin
+
+    val code2 = """
+      |object ProcessState {
+      |  case object RecoverSelf extends ProcessState
+      |  case object Active extends ProcessState
+      |  case object Stopped extends ProcessState
+      |}
+      |
+      |class ProcessFSM extends FSM[ProcessState, Data] {
+      |  def recoveryDecision(errorCode: Int): State = {
+      |    errorCode match {
+      |      case 404 => Target.enter(ProcessState.Active, DefaultData)
+      |      case _ => Target.enter(ProcessState.Stopped, ErrorData("fatal"))
+      |    }
+      |  }
+      |}
+    """.stripMargin
+
+    val result1 = AkkaFsmAnalyzer.parseScalaCode(code1)
+    assert(result1.isRight)
+    val mermaid1 = result1.getOrElse("")
+    assert(mermaid1.contains("RecoverSelf --> Idle"), "Should detect recovery transitions for custom recovery function name")
+    assert(mermaid1.contains("RecoverSelf --> Failed"), "Should detect all recovery transitions")
+
+    val result2 = AkkaFsmAnalyzer.parseScalaCode(code2)
+    assert(result2.isRight)
+    val mermaid2 = result2.getOrElse("")
+    assert(mermaid2.contains("RecoverSelf --> Active"), "Should work with different recovery function names")
+    assert(mermaid2.contains("RecoverSelf --> Stopped"), "Should detect all recovery paths")
+  }
+
+  test("containsStateDefinitions should not be hardcoded to specific names") {
+    // Test cases that should be recognized as state containers
+    val validStateObject1 = """
+      |object ProcessingStates {
+      |  case object Idle extends MyProcessingState
+      |  case object Running extends MyProcessingState
+      |}
+      |
+      |class FSM1 extends FSM[MyProcessingState, Data] {
+      |  when(ProcessingStates.Idle) {
+      |    case Event(Start, _) => goto(ProcessingStates.Running)
+      |  }
+      |}
+    """.stripMargin
+
+    val validStateObject2 = """
+      |object WorkflowPhase {
+      |  case object Initial extends WorkflowPhase
+      |  case object InProgress extends WorkflowPhase
+      |}
+      |
+      |class FSM2 extends FSM[WorkflowPhase, Data] {
+      |  when(WorkflowPhase.Initial) {
+      |    case Event(Begin, _) => goto(WorkflowPhase.InProgress)
+      |  }
+      |}
+    """.stripMargin
+
+    val validStateObject3 = """
+      |object MyStatus {
+      |  case object Waiting extends ProcessStatus
+      |  case object Active extends ProcessStatus
+      |}
+      |
+      |class FSM3 extends FSM[ProcessStatus, Data] {
+      |  when(MyStatus.Waiting) {
+      |    case Event(Activate, _) => goto(MyStatus.Active)
+      |  }
+      |}
+    """.stripMargin
+
+    // Test cases that should NOT be recognized as state containers
+    val eventObject = """
+      |object OrderEvent {
+      |  case object OrderPlaced extends OrderEvent
+      |  case object OrderCancelled extends OrderEvent  
+      |}
+    """.stripMargin
+
+    val messageObject = """
+      |object ProcessMessage {
+      |  case object StartMessage extends ProcessMessage
+      |  case object StopMessage extends ProcessMessage
+      |}
+    """.stripMargin
+
+    val commandObject = """
+      |object SystemCommand {
+      |  case object StartCommand extends SystemCommand
+      |  case object StopCommand extends SystemCommand
+      |}
+    """.stripMargin
+
+    // Run tests with objects that contain different state-like names
+    val result1 = AkkaFsmAnalyzer.parseScalaCode(validStateObject1)
+    assert(result1.isRight, "Should parse valid state object with 'ProcessingStates' name")
+    val mermaid1 = result1.getOrElse("")
+    assert(mermaid1.contains("Idle --> Running"), "Should detect transitions for ProcessingStates")
+
+    val result2 = AkkaFsmAnalyzer.parseScalaCode(validStateObject2)
+    assert(result2.isRight, "Should parse valid state object with 'WorkflowPhase' name")
+    val mermaid2 = result2.getOrElse("")
+    assert(mermaid2.contains("Initial --> InProgress"), "Should detect transitions for WorkflowPhase")
+
+    val result3 = AkkaFsmAnalyzer.parseScalaCode(validStateObject3)
+    assert(result3.isRight, "Should parse valid state object with 'MyStatus' name")
+    val mermaid3 = result3.getOrElse("")
+    assert(mermaid3.contains("Waiting --> Active"), "Should detect transitions for Status-based states")
+
+    val result4 = AkkaFsmAnalyzer.parseScalaCode(eventObject)
+    assert(result4.isRight, "Should parse but not treat Event object as states")
+    val mermaid4 = result4.getOrElse("")
+    assert(mermaid4.contains("NoTransitions"), "Event objects should not be treated as states")
+
+    val result5 = AkkaFsmAnalyzer.parseScalaCode(messageObject)
+    assert(result5.isRight, "Should parse but not treat Message object as states")
+    val mermaid5 = result5.getOrElse("")
+    assert(mermaid5.contains("NoTransitions"), "Message objects should not be treated as states")
+
+    val result6 = AkkaFsmAnalyzer.parseScalaCode(commandObject)
+    assert(result6.isRight, "Should parse but not treat Command object as states")
+    val mermaid6 = result6.getOrElse("")
+    assert(mermaid6.contains("NoTransitions"), "Command objects should not be treated as states")
+  }
+
 }
