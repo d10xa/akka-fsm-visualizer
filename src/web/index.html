@@ -32,9 +32,12 @@
             
             <div class="panel diagram-panel">
                 <div class="panel-header">
-                    <h3>FSM Diagram</h3>
+                    <h3>FSM Diagram 
+                        <span id="modifiedIndicator" class="modified-indicator" title="Mermaid code has been manually edited">●</span>
+                    </h3>
                     <div class="diagram-controls">
                         <button id="toggleSource" class="btn btn-toggle">Show Code</button>
+                        <button id="regenerateCode" class="btn btn-regenerate" title="Re-generate from Scala code">⟳ Re-generate</button>
                         <button id="exportSvg" class="btn btn-export">Export SVG</button>
                         <button id="exportPng" class="btn btn-export">Export PNG</button>
                         <button id="fullscreen" class="btn btn-fullscreen">Fullscreen</button>
@@ -43,7 +46,7 @@
                 <div id="diagramContainer" class="diagram-display">
                     <div class="placeholder-text">Enter Akka FSM code to see the diagram</div>
                 </div>
-                <textarea id="mermaidOutput" class="mermaid-source" readonly placeholder="Mermaid diagram code..."></textarea>
+                <textarea id="mermaidOutput" class="mermaid-source" placeholder="Mermaid diagram code..."></textarea>
             </div>
         </div>
     </div>

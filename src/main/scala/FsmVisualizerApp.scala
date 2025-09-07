@@ -15,6 +15,11 @@ object FsmVisualizerApp {
   private var dragStartX: Double = 0.0
   private var dragStartY: Double = 0.0
   
+  // Mermaid editing state
+  private var lastGeneratedMermaid: String = ""
+  private var isCodeManuallyEdited: Boolean = false
+  private var mermaidEditTimer: Option[Int] = None
+  
   def main(args: Array[String]): Unit = {
     dom.document.addEventListener("DOMContentLoaded", { (_: dom.Event) =>
       setupUI()
@@ -38,6 +43,8 @@ object FsmVisualizerApp {
     val zoomResetButton = Option(document.getElementById("zoomReset")).map(_.asInstanceOf[dom.HTMLButtonElement])
     val fitToScreenButton = Option(document.getElementById("fitToScreen")).map(_.asInstanceOf[dom.HTMLButtonElement])
     val zoomLevelSpan = Option(document.getElementById("zoomLevel")).map(_.asInstanceOf[dom.HTMLSpanElement])
+    val regenerateButton = Option(document.getElementById("regenerateCode")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val modifiedIndicator = Option(document.getElementById("modifiedIndicator")).map(_.asInstanceOf[dom.HTMLSpanElement])
     val errorDiv = Option(document.getElementById("error")).map(_.asInstanceOf[dom.HTMLDivElement])
     val mermaidOutput = Option(document.getElementById("mermaidOutput")).map(_.asInstanceOf[dom.HTMLTextAreaElement])
     val diagramContainer = Option(document.getElementById("diagramContainer")).map(_.asInstanceOf[dom.HTMLDivElement])
@@ -48,6 +55,7 @@ object FsmVisualizerApp {
         fullscreenModal.isEmpty || closeFullscreenButton.isEmpty || fullscreenDiagram.isEmpty ||
         zoomContainer.isEmpty || zoomInButton.isEmpty || zoomOutButton.isEmpty || 
         zoomResetButton.isEmpty || fitToScreenButton.isEmpty || zoomLevelSpan.isEmpty ||
+        regenerateButton.isEmpty || modifiedIndicator.isEmpty ||
         errorDiv.isEmpty || mermaidOutput.isEmpty || diagramContainer.isEmpty) {
       println("Some DOM elements not found, retrying in 100ms...")
       dom.window.setTimeout(() => setupUI(), 100)
@@ -71,6 +79,8 @@ object FsmVisualizerApp {
     val zoomResetButtonEl = zoomResetButton.get
     val fitToScreenButtonEl = fitToScreenButton.get
     val zoomLevelSpanEl = zoomLevelSpan.get
+    val regenerateButtonEl = regenerateButton.get
+    val modifiedIndicatorEl = modifiedIndicator.get
     val errorDivEl = errorDiv.get
     val mermaidOutputEl = mermaidOutput.get
     val diagramContainerEl = diagramContainer.get
@@ -122,10 +132,26 @@ object FsmVisualizerApp {
     toggleButtonEl.addEventListener("click", { (_: dom.Event) =>
       val isSourceVisible = mermaidOutputEl.style.display == "block"
       if (isSourceVisible) {
+        // Switching from code view to diagram view
         mermaidOutputEl.style.display = "none"
         diagramContainerEl.style.display = "block"
         toggleButtonEl.textContent = "Show Code"
+        
+        // Re-render diagram with current Mermaid code (in case it was manually edited)
+        val currentMermaidCode = mermaidOutputEl.value
+        if (currentMermaidCode.trim.nonEmpty) {
+          try {
+            renderMermaidDiagram(currentMermaidCode, diagramContainerEl)
+            clearError(errorDivEl)
+          } catch {
+            case ex: Exception =>
+              showError(errorDivEl, s"Mermaid rendering error: ${ex.getMessage}")
+          }
+        } else {
+          diagramContainerEl.innerHTML = """<div class="placeholder-text">Enter Mermaid code to see the diagram</div>"""
+        }
       } else {
+        // Switching from diagram view to code view
         mermaidOutputEl.style.display = "block"
         diagramContainerEl.style.display = "none"
         toggleButtonEl.textContent = "Show Diagram"
@@ -187,6 +213,20 @@ object FsmVisualizerApp {
     
     fitToScreenButtonEl.addEventListener("click", { (_: dom.Event) =>
       fitToScreen(zoomContainerEl, zoomLevelSpanEl)
+    })
+    
+    // Regenerate code button handler
+    regenerateButtonEl.addEventListener("click", { (_: dom.Event) =>
+      if (isCodeManuallyEdited) {
+        if (dom.window.confirm("This will replace your manually edited Mermaid code with a new version generated from the Scala code. Are you sure?")) {
+          regenerateMermaidCode(codeTextareaEl.value, mermaidOutputEl, diagramContainerEl, errorDivEl, regenerateButtonEl, modifiedIndicatorEl)
+        }
+      }
+    })
+    
+    // Mermaid code editing handler
+    mermaidOutputEl.addEventListener("input", { (_: dom.Event) =>
+      onMermaidCodeEdit(mermaidOutputEl, diagramContainerEl, errorDivEl, regenerateButtonEl, modifiedIndicatorEl)
     })
     
     // Initialize mermaid with retry mechanism
@@ -341,13 +381,25 @@ object FsmVisualizerApp {
     AkkaFsmAnalyzer.parseScalaCode(code) match {
       case Right(mermaidCode) =>
         clearError(errorDiv)
+        
+        // Update state tracking
+        lastGeneratedMermaid = mermaidCode
+        isCodeManuallyEdited = false
+        
+        // Update UI
         outputTextarea.value = mermaidCode
+        updateMermaidEditingState(outputTextarea, None, None)
         renderMermaidDiagram(mermaidCode, diagramContainer)
         
       case Left(error) =>
         showError(errorDiv, error)
         outputTextarea.value = ""
         diagramContainer.innerHTML = s"""<div class="error-text">Parse Error: $error</div>"""
+        
+        // Reset state
+        lastGeneratedMermaid = ""
+        isCodeManuallyEdited = false
+        updateMermaidEditingState(outputTextarea, None, None)
     }
   }
   
@@ -746,5 +798,58 @@ object FsmVisualizerApp {
         updateZoomLevel(zoomLevelSpan)
       }
     })
+  }
+  
+  // Mermaid editing functionality
+  private def updateMermaidEditingState(textarea: dom.HTMLTextAreaElement, regenerateButton: Option[dom.HTMLButtonElement], indicator: Option[dom.HTMLSpanElement]): Unit = {
+    if (isCodeManuallyEdited) {
+      textarea.classList.add("modified")
+      regenerateButton.foreach(_.classList.add("show"))
+      indicator.foreach(_.classList.add("show"))
+    } else {
+      textarea.classList.remove("modified")
+      regenerateButton.foreach(_.classList.remove("show"))
+      indicator.foreach(_.classList.remove("show"))
+    }
+  }
+  
+  private def onMermaidCodeEdit(textarea: dom.HTMLTextAreaElement, diagramContainer: dom.HTMLDivElement, errorDiv: dom.HTMLDivElement, regenerateButton: dom.HTMLButtonElement, indicator: dom.HTMLSpanElement): Unit = {
+    val currentCode = textarea.value
+    
+    // Check if code has been manually modified
+    if (currentCode != lastGeneratedMermaid && lastGeneratedMermaid.nonEmpty) {
+      isCodeManuallyEdited = true
+      updateMermaidEditingState(textarea, Some(regenerateButton), Some(indicator))
+    }
+    
+    // Clear any existing timer
+    mermaidEditTimer.foreach(timer => dom.window.clearTimeout(timer))
+    
+    // Set a new timer to debounce the rendering
+    val timerId = dom.window.setTimeout(() => {
+      if (currentCode.trim.nonEmpty) {
+        try {
+          renderMermaidDiagram(currentCode, diagramContainer)
+          clearError(errorDiv)
+        } catch {
+          case ex: Exception =>
+            showError(errorDiv, s"Mermaid rendering error: ${ex.getMessage}")
+        }
+      } else {
+        diagramContainer.innerHTML = """<div class="placeholder-text">Enter Mermaid code to see the diagram</div>"""
+        clearError(errorDiv)
+      }
+    }, 500) // 500ms debounce for manual edits
+    
+    mermaidEditTimer = Some(timerId)
+  }
+  
+  private def regenerateMermaidCode(scalaCode: String, outputTextarea: dom.HTMLTextAreaElement, diagramContainer: dom.HTMLDivElement, errorDiv: dom.HTMLDivElement, regenerateButton: dom.HTMLButtonElement, indicator: dom.HTMLSpanElement): Unit = {
+    // Clear modified state first
+    isCodeManuallyEdited = false
+    updateMermaidEditingState(outputTextarea, Some(regenerateButton), Some(indicator))
+    
+    // Re-analyze the Scala code
+    analyzeCode(scalaCode, outputTextarea, diagramContainer, errorDiv)
   }
 }
