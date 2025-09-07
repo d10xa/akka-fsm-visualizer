@@ -9,11 +9,18 @@ Akka FSM Visualizer is a web-based tool that converts Akka Finite State Machine 
 ## Development Commands
 
 ```bash
-# Compile and generate JavaScript (development mode)
-sbt fastOptJS
+# Development build (fast compilation + copy static assets)
+sbt dev
 
-# Compile optimized JavaScript (production mode) 
+# Individual tasks
+sbt fastOptJS      # Just compile JS to dist/dev/
+sbt copyAssetsDev  # Just copy static assets to dist/dev/
+
+# Production build (optimized compilation)
 sbt fullOptJS
+
+# Build for Jekyll site deployment
+sbt jekyllBuild
 
 # Start SBT shell for interactive development
 sbt
@@ -21,18 +28,34 @@ sbt
 # Clean build artifacts
 sbt clean
 
-# Serve the web app locally
-cd docs && python3 -m http.server 8000
+# Serve the web app locally for development
+cd dist/dev && python3 -m http.server 8000
 ```
 
-After running `sbt fastOptJS`, open `docs/index.html` in a browser to test changes.
+After running `sbt dev`, the complete development build is available in `dist/dev/`. Open `dist/dev/index.html` in a browser or use the local server.
+
+## Project Structure
+
+```
+├── src/
+│   ├── main/scala/        # Scala.js source code
+│   └── web/              # Static web assets (HTML, CSS)
+│       ├── index.html    # Development HTML template
+│       ├── style.css     # Styles
+│       └── jekyll.html   # Jekyll site template
+├── dist/                 # Build outputs (ignored by git)
+│   ├── dev/             # Development build
+│   ├── prod/            # Production build
+│   └── jekyll/          # Jekyll site files
+└── docs/                 # Legacy directory (only index.html, style.css)
+```
 
 ## Architecture
 
 ### Technology Stack
 - **Scala 2.13.16** with **Scala.js** for browser compilation
 - **Scalameta** for parsing and analyzing Scala AST
-- HTML/CSS/JavaScript frontend in `docs/`
+- Static web assets in `src/web/`, build outputs in `dist/`
 
 ### Core Components
 

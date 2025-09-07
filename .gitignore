@@ -33,5 +33,9 @@ tmp.txt
 delete.txt
 *.bak
 *.bak2
-jekyll/
-docs/main.js
+# Build outputs
+dist/
+
+# Generated files that were previously committed
+docs/*.js
+docs/*.js.map
