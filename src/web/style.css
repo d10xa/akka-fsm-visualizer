@@ -289,23 +289,44 @@ header p {
     height: auto;
 }
 
-/* Enhanced styling for better PNG export quality */
+/* Enhanced styling for extreme PNG export quality */
 .diagram-display svg text {
     font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     font-weight: 500;
+    text-rendering: optimizeLegibility;
+    font-smooth: always;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
 }
 
 .diagram-display svg .nodeLabel {
-    font-size: 14px !important;
-    font-weight: 600 !important;
+    font-size: 16px !important; /* Increased for extreme quality */
+    font-weight: 700 !important; /* Bolder for better readability */
+    text-rendering: optimizeLegibility;
 }
 
 .diagram-display svg .edgeLabel {
-    font-size: 12px !important;
-    font-weight: 500 !important;
+    font-size: 14px !important; /* Increased for extreme quality */
+    font-weight: 600 !important; /* Bolder for better readability */
     background: white;
-    padding: 2px 4px;
-    border-radius: 3px;
+    padding: 3px 6px; /* More padding for extreme quality */
+    border-radius: 4px;
+    text-rendering: optimizeLegibility;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.1); /* Subtle shadow for better contrast */
+}
+
+/* Additional extreme quality enhancements */
+.diagram-display svg {
+    shape-rendering: geometricPrecision;
+    text-rendering: optimizeLegibility;
+}
+
+.diagram-display svg path {
+    stroke-width: 2px; /* Slightly thicker lines for better visibility */
+}
+
+.diagram-display svg rect {
+    stroke-width: 2px; /* Thicker borders for nodes */
 }
 
 /* Responsive design */

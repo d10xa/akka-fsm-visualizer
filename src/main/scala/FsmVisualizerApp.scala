@@ -584,15 +584,15 @@ object FsmVisualizerApp {
         val html2canvas = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].html2canvas
         
         if (!scala.scalajs.js.isUndefined(html2canvas)) {
-          // Calculate adaptive scale based on diagram size  
-          val adaptiveScale = if (diagramArea > 500000) 6.0 else if (diagramArea > 200000) 4.0 else 3.0
+          // Calculate adaptive scale based on diagram size - doubled for ultra quality
+          val adaptiveScale = if (diagramArea > 500000) 12.0 else if (diagramArea > 200000) 8.0 else 6.0
           
           println(s"PNG Export: Diagram size ${containerRect.width}x${containerRect.height}, using scale $adaptiveScale")
           
-          // Use html2canvas if available - ultra high quality settings for large diagrams
+          // Use html2canvas if available - extreme high quality settings
           html2canvas(container, scala.scalajs.js.Dynamic.literal(
             backgroundColor = "white",
-            scale = adaptiveScale, // Adaptive scaling based on diagram size
+            scale = adaptiveScale, // Doubled adaptive scaling for extreme quality
             useCORS = true,
             allowTaint = false,
             logging = false,
@@ -601,13 +601,29 @@ object FsmVisualizerApp {
             windowWidth = container.scrollWidth,
             windowHeight = container.scrollHeight,
             removeContainer = false,
-            imageTimeout = 60000, // Longer timeout for large diagrams
-            foreignObjectRendering = false // Better text rendering
+            imageTimeout = 120000, // Extended timeout for extreme quality rendering
+            foreignObjectRendering = false, // Better text rendering
+            letterRendering = true, // Enhanced letter rendering
+            onclone = scala.scalajs.js.defined { (clonedDoc: org.scalajs.dom.Document) =>
+              // Enhance text rendering in cloned document for extreme quality
+              val style = clonedDoc.createElement("style")
+              style.textContent = """
+                text { 
+                  text-rendering: optimizeLegibility !important; 
+                  font-smooth: always !important;
+                  -webkit-font-smoothing: antialiased !important;
+                }
+              """
+              val head = clonedDoc.querySelector("head")
+              if (head != null) {
+                head.appendChild(style)
+              }
+            }
           )).`then`((canvas: dom.HTMLCanvasElement) => {
             val dataUrl = canvas.toDataURL("image/png", 1.0) // Maximum quality
             val link = document.createElement("a").asInstanceOf[dom.HTMLAnchorElement]
             link.href = dataUrl
-            val scaleText = if (adaptiveScale >= 6.0) "ultra-hq" else if (adaptiveScale >= 4.0) "super-hq" else "hq"
+            val scaleText = if (adaptiveScale >= 12.0) "extreme-hq" else if (adaptiveScale >= 8.0) "ultra-hq" else "super-hq"
             link.download = s"fsm-diagram-${scaleText}.png"
             link.click()
             println(s"PNG Export completed: ${canvas.width}x${canvas.height} pixels")
@@ -620,7 +636,7 @@ object FsmVisualizerApp {
           // Get SVG dimensions and calculate adaptive scale
           val svgRect = svgElement.getBoundingClientRect()
           val diagramArea = svgRect.width * svgRect.height
-          val adaptiveScale = if (diagramArea > 500000) 8.0 else if (diagramArea > 200000) 6.0 else 4.0 // Even higher for fallback
+          val adaptiveScale = if (diagramArea > 500000) 16.0 else if (diagramArea > 200000) 12.0 else 8.0 // Even higher for fallback - doubled
           
           println(s"PNG Fallback Export: Diagram size ${svgRect.width}x${svgRect.height}, using scale $adaptiveScale")
           
@@ -671,7 +687,7 @@ object FsmVisualizerApp {
               val pngDataUrl = canvas.toDataURL("image/png", 1.0) // Maximum quality
               val link = document.createElement("a").asInstanceOf[dom.HTMLAnchorElement]
               link.href = pngDataUrl
-              val scaleText = if (adaptiveScale >= 8.0) "ultra-hq" else if (adaptiveScale >= 6.0) "super-hq" else "hq"
+              val scaleText = if (adaptiveScale >= 16.0) "extreme-hq" else if (adaptiveScale >= 12.0) "ultra-hq" else "super-hq"
               link.download = s"fsm-diagram-fallback-${scaleText}.png"
               link.click()
               println(s"PNG Fallback Export completed: ${canvas.width}x${canvas.height} pixels")
