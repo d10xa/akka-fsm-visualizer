@@ -728,15 +728,22 @@ object FsmVisualizerApp {
       container.classList.remove("dragging")
     })
     
-    // Mouse wheel zoom
+    // Mouse wheel zoom with trackpad sensitivity handling
     container.addEventListener("wheel", { (e: dom.WheelEvent) =>
       e.preventDefault()
       val zoomLevelSpan = document.getElementById("zoomLevel").asInstanceOf[dom.HTMLSpanElement]
       
-      if (e.deltaY < 0) {
-        zoomIn(container, zoomLevelSpan)
-      } else {
-        zoomOut(container, zoomLevelSpan)
+      // Calculate zoom factor based on wheel delta for smooth trackpad experience
+      // Normalize deltaY to reasonable range and apply exponential scaling
+      val deltaY = Math.max(-100, Math.min(100, e.deltaY)) // Clamp deltaY
+      val zoomFactor = Math.pow(1.002, -deltaY) // Smoother scaling factor
+      
+      val newZoom = Math.max(0.1, Math.min(5.0, currentZoom * zoomFactor))
+      
+      if (newZoom != currentZoom) {
+        currentZoom = newZoom
+        updateTransform(container)
+        updateZoomLevel(zoomLevelSpan)
       }
     })
   }
