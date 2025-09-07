@@ -573,35 +573,72 @@ object FsmVisualizerApp {
     try {
       val svgElement = container.querySelector("svg")
       if (svgElement != null) {
+        // Show loading message for large diagrams
+        val containerRect = container.getBoundingClientRect()
+        val diagramArea = containerRect.width * containerRect.height
+        if (diagramArea > 200000) {
+          println("Exporting large diagram - this may take a few moments...")
+        }
+        
         // Try to use html2canvas library if available, otherwise fall back to simpler method
         val html2canvas = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].html2canvas
         
         if (!scala.scalajs.js.isUndefined(html2canvas)) {
-          // Use html2canvas if available
+          // Calculate adaptive scale based on diagram size  
+          val adaptiveScale = if (diagramArea > 500000) 6.0 else if (diagramArea > 200000) 4.0 else 3.0
+          
+          println(s"PNG Export: Diagram size ${containerRect.width}x${containerRect.height}, using scale $adaptiveScale")
+          
+          // Use html2canvas if available - ultra high quality settings for large diagrams
           html2canvas(container, scala.scalajs.js.Dynamic.literal(
             backgroundColor = "white",
-            scale = 2
+            scale = adaptiveScale, // Adaptive scaling based on diagram size
+            useCORS = true,
+            allowTaint = false,
+            logging = false,
+            width = container.scrollWidth,
+            height = container.scrollHeight,
+            windowWidth = container.scrollWidth,
+            windowHeight = container.scrollHeight,
+            removeContainer = false,
+            imageTimeout = 60000, // Longer timeout for large diagrams
+            foreignObjectRendering = false // Better text rendering
           )).`then`((canvas: dom.HTMLCanvasElement) => {
-            val dataUrl = canvas.toDataURL("image/png")
+            val dataUrl = canvas.toDataURL("image/png", 1.0) // Maximum quality
             val link = document.createElement("a").asInstanceOf[dom.HTMLAnchorElement]
             link.href = dataUrl
-            link.download = "fsm-diagram.png"
+            val scaleText = if (adaptiveScale >= 6.0) "ultra-hq" else if (adaptiveScale >= 4.0) "super-hq" else "hq"
+            link.download = s"fsm-diagram-${scaleText}.png"
             link.click()
+            println(s"PNG Export completed: ${canvas.width}x${canvas.height} pixels")
           })
         } else {
-          // Fallback: create a cleaned SVG without external references
+          // Fallback: create ultra high-resolution PNG from SVG
           val canvas = document.createElement("canvas").asInstanceOf[dom.HTMLCanvasElement]
           val ctx = canvas.getContext("2d").asInstanceOf[dom.CanvasRenderingContext2D]
           
-          // Get SVG dimensions
+          // Get SVG dimensions and calculate adaptive scale
           val svgRect = svgElement.getBoundingClientRect()
-          canvas.width = svgRect.width.toInt
-          canvas.height = svgRect.height.toInt
+          val diagramArea = svgRect.width * svgRect.height
+          val adaptiveScale = if (diagramArea > 500000) 8.0 else if (diagramArea > 200000) 6.0 else 4.0 // Even higher for fallback
           
-          // Clean SVG data by removing potential problematic elements
+          println(s"PNG Fallback Export: Diagram size ${svgRect.width}x${svgRect.height}, using scale $adaptiveScale")
+          
+          val scaledWidth = (svgRect.width * adaptiveScale).toInt
+          val scaledHeight = (svgRect.height * adaptiveScale).toInt
+          
+          // Set canvas to ultra-high resolution
+          canvas.width = scaledWidth
+          canvas.height = scaledHeight
+          
+          // Scale the context to match the increased canvas size
+          ctx.scale(adaptiveScale, adaptiveScale)
+          
+          // Clean SVG data and set high resolution dimensions
           var svgData = new dom.XMLSerializer().serializeToString(svgElement)
           svgData = svgData.replaceAll("xmlns=\"http://www.w3.org/2000/svg\"", "")
-          svgData = s"""<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}">$svgData</svg>"""
+          // Use original dimensions in SVG, scaling is handled by canvas context
+          svgData = s"""<svg xmlns="http://www.w3.org/2000/svg" width="${svgRect.width}" height="${svgRect.height}">$svgData</svg>"""
           
           val svgBlob = new dom.Blob(
             scala.scalajs.js.Array(svgData), 
@@ -617,17 +654,27 @@ object FsmVisualizerApp {
           
           img.onload = { (_: dom.Event) =>
             try {
-              // Fill white background
-              ctx.fillStyle = "white"
-              ctx.fillRect(0, 0, canvas.width, canvas.height)
+              // Enable high-quality rendering
+              ctx.imageSmoothingEnabled = true
+              val ctxDynamic = ctx.asInstanceOf[scala.scalajs.js.Dynamic]
+              if (!scala.scalajs.js.isUndefined(ctxDynamic.imageSmoothingQuality)) {
+                ctxDynamic.imageSmoothingQuality = "high"
+              }
               
+              // Fill white background at scaled dimensions
+              ctx.fillStyle = "white"
+              ctx.fillRect(0, 0, svgRect.width, svgRect.height)
+              
+              // Draw the SVG image (scaling is already applied by context)
               ctx.drawImage(img, 0, 0)
               
-              val pngDataUrl = canvas.toDataURL("image/png")
+              val pngDataUrl = canvas.toDataURL("image/png", 1.0) // Maximum quality
               val link = document.createElement("a").asInstanceOf[dom.HTMLAnchorElement]
               link.href = pngDataUrl
-              link.download = "fsm-diagram.png"
+              val scaleText = if (adaptiveScale >= 8.0) "ultra-hq" else if (adaptiveScale >= 6.0) "super-hq" else "hq"
+              link.download = s"fsm-diagram-fallback-${scaleText}.png"
               link.click()
+              println(s"PNG Fallback Export completed: ${canvas.width}x${canvas.height} pixels")
             } catch {
               case ex: Exception =>
                 println(s"Canvas export failed: ${ex.getMessage}")
