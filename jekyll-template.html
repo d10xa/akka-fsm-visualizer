@@ -1,11 +1,12 @@
 ---
-layout: default
+layout: null
 title: "Akka FSM Visualizer"
 description: "Convert Akka FSM code to Mermaid state diagrams with live preview"
 permalink: /akka-fsm-visualizer/
+categories: [app]
 ---
 
-<link rel="stylesheet" href="{{ '/assets/css/akka-fsm-visualizer.css' | relative_url }}">
+<link rel="stylesheet" href="{{ '/apps/assets/css/akka-fsm-visualizer.css' | relative_url }}">
 <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
 
 <div class="container">
@@ -19,6 +20,11 @@ permalink: /akka-fsm-visualizer/
             <input type="file" id="fileInput" accept=".scala" />
             <label for="fileInput">Upload .scala file</label>
         </div>
+        <label class="checkbox-wrapper">
+            <input type="checkbox" id="simplifiedMode" />
+            <span class="checkmark"></span>
+            Simplified mode (hide self-transitions)
+        </label>
         <button id="copyButton" class="btn btn-copy">Copy Mermaid</button>
     </div>
 
@@ -45,4 +51,4 @@ permalink: /akka-fsm-visualizer/
     </div>
 </div>
 
-<script type="text/javascript" src="{{ '/assets/js/akka-fsm-visualizer.js' | relative_url }}"></script>
+<script type="text/javascript" src="{{ '/apps/assets/js/akka-fsm-visualizer.js' | relative_url }}"></script>

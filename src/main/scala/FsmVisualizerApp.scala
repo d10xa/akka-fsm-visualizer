@@ -5,6 +5,8 @@ import scala.scalajs.js.annotation.JSExportTopLevel
 @JSExportTopLevel("FsmVisualizerApp")
 object FsmVisualizerApp {
   
+  private var analysisTimer: Option[Int] = None
+  
   def main(args: Array[String]): Unit = {
     dom.document.addEventListener("DOMContentLoaded", { (_: dom.Event) =>
       setupUI()
@@ -28,6 +30,8 @@ object FsmVisualizerApp {
     
     // Check if all required elements are present
     if (fileInput.isEmpty || codeTextarea.isEmpty || copyButton.isEmpty || toggleButton.isEmpty || 
+        exportSvgButton.isEmpty || exportPngButton.isEmpty || fullscreenButton.isEmpty ||
+        fullscreenModal.isEmpty || closeFullscreenButton.isEmpty || fullscreenDiagram.isEmpty ||
         errorDiv.isEmpty || mermaidOutput.isEmpty || diagramContainer.isEmpty) {
       println("Some DOM elements not found, retrying in 100ms...")
       dom.window.setTimeout(() => setupUI(), 100)
@@ -67,22 +71,34 @@ object FsmVisualizerApp {
       }
     })
     
-    // Auto-analyze on code change
+    // Auto-analyze on code change with debouncing
     codeTextareaEl.addEventListener("input", { (_: dom.Event) =>
-      val code = codeTextareaEl.value
-      if (code.trim.nonEmpty) {
-        analyzeCode(code, mermaidOutputEl, diagramContainerEl, errorDivEl)
-      } else {
-        mermaidOutputEl.value = ""
-        diagramContainerEl.innerHTML = """<div class="placeholder-text">Enter Akka FSM code to see the diagram</div>"""
-        clearError(errorDivEl)
-      }
+      // Clear any existing timer
+      analysisTimer.foreach(timer => dom.window.clearTimeout(timer))
+      
+      // Set a new timer to debounce the analysis
+      val timerId = dom.window.setTimeout(() => {
+        val code = codeTextareaEl.value
+        if (code.trim.nonEmpty) {
+          analyzeCode(code, mermaidOutputEl, diagramContainerEl, errorDivEl)
+        } else {
+          mermaidOutputEl.value = ""
+          diagramContainerEl.innerHTML = """<div class="placeholder-text">Enter Akka FSM code to see the diagram</div>"""
+          clearError(errorDivEl)
+        }
+      }, 300) // 300ms debounce delay
+      
+      analysisTimer = Some(timerId)
     })
     
     
+    // Initialize display states
+    mermaidOutputEl.style.display = "none"
+    diagramContainerEl.style.display = "block"
+    
     // Toggle source view
     toggleButtonEl.addEventListener("click", { (_: dom.Event) =>
-      val isSourceVisible = mermaidOutputEl.style.display != "none"
+      val isSourceVisible = mermaidOutputEl.style.display == "block"
       if (isSourceVisible) {
         mermaidOutputEl.style.display = "none"
         diagramContainerEl.style.display = "block"
@@ -298,6 +314,12 @@ object FsmVisualizerApp {
   
   private def renderMermaidDiagram(mermaidCode: String, container: dom.HTMLDivElement): Unit = {
     try {
+      // Validate container exists
+      if (container == null) {
+        println("Error: diagram container is null")
+        return
+      }
+      
       // Clear previous content
       container.innerHTML = ""
       
@@ -306,6 +328,12 @@ object FsmVisualizerApp {
       
       // Create div for mermaid
       val mermaidDiv = document.createElement("div")
+      if (mermaidDiv == null) {
+        println("Error: could not create mermaid div")
+        container.innerHTML = """<div class="error-text">Failed to create diagram element</div>"""
+        return
+      }
+      
       mermaidDiv.setAttribute("class", "mermaid")
       mermaidDiv.setAttribute("id", diagramId)
       mermaidDiv.textContent = mermaidCode
@@ -322,11 +350,19 @@ object FsmVisualizerApp {
       // Add small delay to ensure DOM is ready
       dom.window.setTimeout(() => {
         try {
+          // Re-find the mermaid div to ensure it's still valid
+          val currentMermaidDiv = document.getElementById(diagramId)
+          if (currentMermaidDiv == null) {
+            println(s"Error: mermaid div with id $diagramId not found")
+            container.innerHTML = """<div class="error-text">Failed to find diagram element for rendering</div>"""
+            return
+          }
+          
           // Try modern API first, fallback to legacy
           if (!scala.scalajs.js.isUndefined(mermaid.run)) {
             // Modern async API (v10+)
             val promise = mermaid.run(scala.scalajs.js.Dynamic.literal(
-              nodes = scala.scalajs.js.Array(mermaidDiv)
+              nodes = scala.scalajs.js.Array(currentMermaidDiv)
             ))
             
             if (!scala.scalajs.js.isUndefined(promise) && !scala.scalajs.js.isUndefined(promise.`catch`)) {
@@ -346,12 +382,14 @@ object FsmVisualizerApp {
                   "Unknown error"
                 }
                 println(s"Mermaid render error: $errorMsg")
-                container.innerHTML = s"""<div class="error-text">Failed to render diagram: $errorMsg</div>"""
+                if (container != null) {
+                  container.innerHTML = s"""<div class="error-text">Failed to render diagram: $errorMsg</div>"""
+                }
               })
             }
           } else {
             // Legacy API (v9 and below)
-            mermaid.init(scala.scalajs.js.undefined, mermaidDiv)
+            mermaid.init(scala.scalajs.js.undefined, currentMermaidDiv)
           }
         } catch {
           case ex: Exception =>
@@ -444,41 +482,86 @@ object FsmVisualizerApp {
     try {
       val svgElement = container.querySelector("svg")
       if (svgElement != null) {
-        val canvas = document.createElement("canvas").asInstanceOf[dom.HTMLCanvasElement]
-        val ctx = canvas.getContext("2d").asInstanceOf[dom.CanvasRenderingContext2D]
+        // Try to use html2canvas library if available, otherwise fall back to simpler method
+        val html2canvas = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].html2canvas
         
-        val svgData = new dom.XMLSerializer().serializeToString(svgElement)
-        val svgBlob = new dom.Blob(
-          scala.scalajs.js.Array(svgData), 
-          new dom.BlobPropertyBag {
-            `type` = "image/svg+xml;charset=utf-8"
+        if (!scala.scalajs.js.isUndefined(html2canvas)) {
+          // Use html2canvas if available
+          html2canvas(container, scala.scalajs.js.Dynamic.literal(
+            backgroundColor = "white",
+            scale = 2
+          )).`then`((canvas: dom.HTMLCanvasElement) => {
+            val dataUrl = canvas.toDataURL("image/png")
+            val link = document.createElement("a").asInstanceOf[dom.HTMLAnchorElement]
+            link.href = dataUrl
+            link.download = "fsm-diagram.png"
+            link.click()
+          })
+        } else {
+          // Fallback: create a cleaned SVG without external references
+          val canvas = document.createElement("canvas").asInstanceOf[dom.HTMLCanvasElement]
+          val ctx = canvas.getContext("2d").asInstanceOf[dom.CanvasRenderingContext2D]
+          
+          // Get SVG dimensions
+          val svgRect = svgElement.getBoundingClientRect()
+          canvas.width = svgRect.width.toInt
+          canvas.height = svgRect.height.toInt
+          
+          // Clean SVG data by removing potential problematic elements
+          var svgData = new dom.XMLSerializer().serializeToString(svgElement)
+          svgData = svgData.replaceAll("xmlns=\"http://www.w3.org/2000/svg\"", "")
+          svgData = s"""<svg xmlns="http://www.w3.org/2000/svg" width="${canvas.width}" height="${canvas.height}">$svgData</svg>"""
+          
+          val svgBlob = new dom.Blob(
+            scala.scalajs.js.Array(svgData), 
+            new dom.BlobPropertyBag {
+              `type` = "image/svg+xml;charset=utf-8"
+            }
+          )
+          // Create data URL from SVG directly
+          val dataUrl = "data:image/svg+xml;charset=utf-8," + 
+            scala.scalajs.js.URIUtils.encodeURIComponent(svgData)
+          
+          val img = document.createElement("img").asInstanceOf[dom.HTMLImageElement]
+          
+          img.onload = { (_: dom.Event) =>
+            try {
+              // Fill white background
+              ctx.fillStyle = "white"
+              ctx.fillRect(0, 0, canvas.width, canvas.height)
+              
+              ctx.drawImage(img, 0, 0)
+              
+              val pngDataUrl = canvas.toDataURL("image/png")
+              val link = document.createElement("a").asInstanceOf[dom.HTMLAnchorElement]
+              link.href = pngDataUrl
+              link.download = "fsm-diagram.png"
+              link.click()
+            } catch {
+              case ex: Exception =>
+                println(s"Canvas export failed: ${ex.getMessage}")
+                // Ultimate fallback: just download the SVG
+                exportDiagramAsSvg(container)
+            }
           }
-        )
-        val url = dom.URL.createObjectURL(svgBlob)
-        val img = new dom.Image()
-        
-        img.onload = { (_: dom.Event) =>
-          canvas.width = img.naturalWidth
-          canvas.height = img.naturalHeight
-          ctx.drawImage(img, 0, 0)
           
-          // Use toDataURL as fallback since toBlob might not be available in all browsers
-          val dataUrl = canvas.toDataURL("image/png")
-          val link = document.createElement("a").asInstanceOf[dom.HTMLAnchorElement]
-          link.href = dataUrl
-          link.download = "fsm-diagram.png"
-          link.click()
+          // Set error handler using JavaScript dynamic access
+          val imgDynamic = img.asInstanceOf[scala.scalajs.js.Dynamic]
+          imgDynamic.onerror = { (_: dom.Event) =>
+            println("Failed to load SVG image, falling back to SVG export")
+            exportDiagramAsSvg(container)
+          }
           
-          dom.URL.revokeObjectURL(url)
+          img.src = dataUrl
         }
-        
-        img.src = url
       } else {
         println("No SVG diagram found to export")
       }
     } catch {
       case ex: Exception =>
         println(s"Failed to export PNG: ${ex.getMessage}")
+        // Fallback to SVG export
+        exportDiagramAsSvg(container)
     }
   }
   

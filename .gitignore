@@ -20,3 +20,18 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Node.js / Playwright
+playwright-tests/node_modules/
+playwright-tests/package-lock.json
+playwright-tests/test-results/
+playwright-tests/playwright-report/
+playwright-tests/.cache/
+
+# Temporary files
+tmp.txt
+delete.txt
+*.bak
+*.bak2
+jekyll/
+docs/main.js
