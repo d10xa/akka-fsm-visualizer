@@ -1,7 +1,7 @@
 import scala.meta._
 import scala.scalajs.js.annotation.JSExportTopLevel
 
-case class Link(from: String, to: String, arrow: Option[String])
+case class Link(from: String, to: String, arrow: Option[String], eventLabel: Option[String] = None, isTimeout: Boolean = false)
 
 @JSExportTopLevel("AkkaFsmAnalyzer")
 object AkkaFsmAnalyzer {
@@ -27,8 +27,13 @@ object AkkaFsmAnalyzer {
     val functions = collectFunctionDefinitions(t)
     // Find all state objects (objects containing case objects extending some state trait)
     val stateObjects = collectStateObjects(t)
+    // Find startWith initial state
+    val initialState = findInitialState(t, stateObjects)
+    // Find onTransition blocks
+    val onTransitionLinks = findOnTransitionBlocks(t, stateObjects)
     
-    evalWithFunctions(t, functions, stateObjects)
+    val mainLinks = evalWithFunctions(t, functions, stateObjects)
+    (mainLinks ++ onTransitionLinks).distinct
   }
   
   
@@ -133,6 +138,115 @@ object AkkaFsmAnalyzer {
     nameBasedRecovery || contentBasedRecovery
   }
   
+  private def findInitialState(t: Tree, stateObjects: Set[String]): Option[String] = {
+    val stack = scala.collection.mutable.Stack[Tree]()
+    val visited = scala.collection.mutable.Set[Tree]()
+    val maxIterations = 5000
+    var iterations = 0
+    
+    stack.push(t)
+    
+    while (stack.nonEmpty && iterations < maxIterations) {
+      iterations += 1
+      val current = stack.pop()
+      
+      if (!visited.contains(current)) {
+        visited += current
+        
+        current match {
+          // Match startWith(state, data)
+          case Term.Apply.Initial(Term.Name("startWith"), args) =>
+            args.headOption.foreach {
+              case select @ Term.Select(Term.Name(objName), _: Term.Name) if stateObjects.contains(objName) =>
+                return Some(select.toString())
+              case _ => // Continue searching
+            }
+            
+          case tree: Tree =>
+            tree.children.foreach { child =>
+              if (!visited.contains(child)) {
+                stack.push(child)
+              }
+            }
+        }
+      }
+    }
+    
+    None
+  }
+  
+  private def findOnTransitionBlocks(t: Tree, stateObjects: Set[String]): List[Link] = {
+    val links = scala.collection.mutable.ListBuffer[Link]()
+    val stack = scala.collection.mutable.Stack[Tree]()
+    val visited = scala.collection.mutable.Set[Tree]()
+    val maxIterations = 5000
+    var iterations = 0
+    
+    stack.push(t)
+    
+    while (stack.nonEmpty && iterations < maxIterations) {
+      iterations += 1
+      val current = stack.pop()
+      
+      if (!visited.contains(current)) {
+        visited += current
+        
+        current match {
+          // Match onTransition { case fromState -> toState => ... }
+          case Term.Apply.Initial(Term.Name("onTransition"), List(Term.Block(cases))) =>
+            cases.foreach {
+              case Case(Pat.Extract(Term.Name("->"), List(fromPat, toPat)), _, _) =>
+                val fromState = extractStateFromPattern(fromPat, stateObjects)
+                val toState = extractStateFromPattern(toPat, stateObjects)
+                
+                (fromState, toState) match {
+                  case (Some(from), Some(to)) =>
+                    links += Link(from, to, Some("transition"), Some("onTransition"))
+                  case _ => // Skip invalid patterns
+                }
+                
+              case Case(Pat.ExtractInfix(fromPat, Term.Name("->"), List(toPat)), _, _) =>
+                val fromState = extractStateFromPattern(fromPat, stateObjects)
+                val toState = extractStateFromPattern(toPat, stateObjects)
+                
+                (fromState, toState) match {
+                  case (Some(from), Some(to)) =>
+                    links += Link(from, to, Some("transition"), Some("onTransition"))
+                  case _ => // Skip invalid patterns
+                }
+                
+              case _ => // Skip other case patterns
+            }
+            
+          case tree: Tree =>
+            tree.children.foreach { child =>
+              if (!visited.contains(child)) {
+                stack.push(child)
+              }
+            }
+        }
+      }
+    }
+    
+    links.toList
+  }
+  
+  private def extractStateFromPattern(pattern: Pat, stateObjects: Set[String]): Option[String] = {
+    pattern match {
+      case Pat.Var(Term.Name(objName)) if stateObjects.contains(objName) =>
+        Some(pattern.toString())
+      case Pat.Wildcard() => Some("_") // Wildcard pattern
+      case _ => 
+        // Try to extract from string representation for complex patterns
+        val patStr = pattern.toString()
+        if (stateObjects.exists(obj => patStr.startsWith(s"$obj."))) {
+          Some(patStr)
+        } else {
+          None
+        }
+    }
+  }
+
   private def containsStateDefinitions(tree: Tree): Boolean = {
     // Check if the tree contains case object definitions that extend traits
     // This should look for typical FSM state patterns rather than hardcoded names
@@ -189,13 +303,27 @@ object AkkaFsmAnalyzer {
             try {
               val currentState = exprs.head.toString()
               
+              // Check if this when block has a timeout
+              val hasTimeout = exprs.length > 1 && exprs(1).toString().contains("stateTimeout")
+              
               // Show all transitions including from functions
-              val states = terms.flatMap(term => evalWhen(term, functions, stateObjects, currentState))
-              if (states.nonEmpty) {
-                states.foreach(to => links += Link(currentState, to, None))
+              val transitions = terms.flatMap(term => evalWhenWithEvents(term, functions, stateObjects, currentState))
+              if (transitions.nonEmpty) {
+                transitions.foreach { case (to, event, isTimeout) =>
+                  links += Link(currentState, to, None, event, isTimeout)
+                }
               } else {
                 // No transitions found, mark as unparsed
                 links += Link(currentState, "UnparsedTransition", Some("unparsed"))
+              }
+              
+              // Add timeout transition if stateTimeout is specified
+              if (hasTimeout) {
+                // Look for StateTimeout handling in the cases
+                val timeoutTransitions = terms.flatMap(term => findTimeoutTransitions(term, functions, stateObjects, currentState))
+                timeoutTransitions.foreach { case (to, event) =>
+                  links += Link(currentState, to, Some("timeout"), event, isTimeout = true)
+                }
               }
             } catch {
               case _: Exception =>
@@ -207,7 +335,7 @@ object AkkaFsmAnalyzer {
             val recoveryState = s"${stateObjects.headOption.getOrElse("State")}.RecoverSelf"
             val states = evalWhen(body, functions, stateObjects, recoveryState)
             states.foreach(to => 
-              links += Link(recoveryState, to, Some("recovery"))
+              links += Link(recoveryState, to, Some("recovery"), Some("recovery"))
             )
             
           case tree: Tree =>
@@ -228,7 +356,7 @@ object AkkaFsmAnalyzer {
           val recoveryState = s"${stateObjects.headOption.getOrElse("State")}.RecoverSelf"
           val states = evalWhen(body, functions, stateObjects, recoveryState)
           states.foreach(to => 
-            links += Link(recoveryState, to, Some("recovery"))
+            links += Link(recoveryState, to, Some("recovery"), Some("recovery"))
           )
         }
       }
@@ -265,19 +393,28 @@ object AkkaFsmAnalyzer {
             
           case q"goto(..$args)" =>
             args.headOption.foreach { arg =>
-              results += arg.toString()
+              val stateName = resolveStateExpression(arg, stateObjects)
+              stateName.foreach { state =>
+                results += state
+              }
             }
             
           // Handle replying transitions: goto(state) replying msg
           case Term.Apply.Initial(q"goto(..$args)", _) =>
             args.headOption.foreach { arg =>
-              results += arg.toString()
+              val stateName = resolveStateExpression(arg, stateObjects)
+              stateName.foreach { state =>
+                results += state
+              }
             }
             
           // Handle complex replying patterns: goto(state) replying message
           case Term.ApplyInfix(Term.Apply.Initial(q"goto(..$args)", _), _, _, _) =>
             args.headOption.foreach { arg =>
-              results += arg.toString()
+              val stateName = resolveStateExpression(arg, stateObjects)
+              stateName.foreach { state =>
+                results += state
+              }
             }
             
           // Handle stay() transitions
@@ -358,6 +495,182 @@ object AkkaFsmAnalyzer {
     results.toList
   }
 
+  private def evalWhenWithEvents(t: Tree, functions: Map[String, Tree], stateObjects: Set[String], currentState: String = ""): List[(String, Option[String], Boolean)] = {
+    val results = scala.collection.mutable.ListBuffer[(String, Option[String], Boolean)]()
+    val stack = scala.collection.mutable.Stack[Tree]()
+    val visited = scala.collection.mutable.Set[Tree]()
+    val maxIterations = 10000
+    var iterations = 0
+    var currentEvent: Option[String] = None
+    
+    stack.push(t)
+    
+    while (stack.nonEmpty && iterations < maxIterations) {
+      iterations += 1
+      val current = stack.pop()
+      
+      if (!visited.contains(current)) {
+        visited += current
+        
+        current match {
+          // Match Event patterns: case Event(EventName, data) =>
+          case Case(Pat.Extract(Term.Name("Event"), List(eventPat, _)), _, body) =>
+            currentEvent = extractEventName(eventPat)
+            val transitions = evalWhen(body, functions, stateObjects, currentState)
+            transitions.foreach { to =>
+              results += ((to, currentEvent, false))
+            }
+            
+          // Handle StateTimeout event
+          case Case(Pat.Extract(Term.Name("Event"), List(Term.Name("StateTimeout"), _)), _, body) =>
+            val transitions = evalWhen(body, functions, stateObjects, currentState)
+            transitions.foreach { to =>
+              results += ((to, Some("StateTimeout"), true))
+            }
+            
+          // Regular state transitions without event info
+          case s @ Term.Select(Term.Name(objName), _: Term.Name) if stateObjects.contains(objName) =>
+            results += ((s.toString(), currentEvent, false))
+            
+          case q"goto(..$args)" =>
+            args.headOption.foreach { arg =>
+              val stateName = resolveStateExpression(arg, stateObjects)
+              stateName.foreach { state =>
+                results += ((state, currentEvent, false))
+              }
+            }
+            
+          case Term.Apply.Initial(q"goto(..$args)", _) =>
+            args.headOption.foreach { arg =>
+              val stateName = resolveStateExpression(arg, stateObjects)
+              stateName.foreach { state =>
+                results += ((state, currentEvent, false))
+              }
+            }
+            
+          case Term.ApplyInfix(Term.Apply.Initial(q"goto(..$args)", _), _, _, _) =>
+            args.headOption.foreach { arg =>
+              val stateName = resolveStateExpression(arg, stateObjects)
+              stateName.foreach { state =>
+                results += ((state, currentEvent, false))
+              }
+            }
+            
+          case q"stay()" =>
+            if (currentState.nonEmpty) {
+              results += ((currentState, currentEvent, false))
+            }
+            
+          case Term.Apply.Initial(q"stay()", _) =>
+            if (currentState.nonEmpty) {
+              results += ((currentState, currentEvent, false))
+            }
+            
+          case Term.ApplyInfix(q"stay()", _, _, _) =>
+            if (currentState.nonEmpty) {
+              results += ((currentState, currentEvent, false))
+            }
+            
+          case q"stopSuccess()" =>
+            results += (("stop", currentEvent, false))
+            
+          case tree: Tree =>
+            tree.children.foreach { child =>
+              if (!visited.contains(child)) {
+                stack.push(child)
+              }
+            }
+        }
+      }
+    }
+    
+    results.toList
+  }
+  
+  private def findTimeoutTransitions(t: Tree, functions: Map[String, Tree], stateObjects: Set[String], currentState: String): List[(String, Option[String])] = {
+    val results = scala.collection.mutable.ListBuffer[(String, Option[String])]()
+    val stack = scala.collection.mutable.Stack[Tree]()
+    val visited = scala.collection.mutable.Set[Tree]()
+    val maxIterations = 5000
+    var iterations = 0
+    
+    stack.push(t)
+    
+    while (stack.nonEmpty && iterations < maxIterations) {
+      iterations += 1
+      val current = stack.pop()
+      
+      if (!visited.contains(current)) {
+        visited += current
+        
+        current match {
+          // Match StateTimeout event: case Event(StateTimeout, _) =>
+          case Case(Pat.Extract(Term.Name("Event"), List(Term.Name("StateTimeout"), _)), _, body) =>
+            val transitions = evalWhen(body, functions, stateObjects, currentState)
+            transitions.foreach { to =>
+              results += ((to, Some("StateTimeout")))
+            }
+            
+          case tree: Tree =>
+            tree.children.foreach { child =>
+              if (!visited.contains(child)) {
+                stack.push(child)
+              }
+            }
+        }
+      }
+    }
+    
+    results.toList
+  }
+  
+  private def extractEventName(eventPat: Pat): Option[String] = {
+    eventPat match {
+      case Pat.Var(Term.Name(name)) => Some(name)
+      case Term.Name(name) => Some(name)
+      case _ => None
+    }
+  }
+  
+  private def resolveStateExpression(expr: Term, stateObjects: Set[String]): Option[String] = {
+    expr match {
+      // Direct state reference: State.Idle
+      case select @ Term.Select(Term.Name(objName), _: Term.Name) if stateObjects.contains(objName) =>
+        Some(select.toString())
+        
+      // Simple variable name like 'to' or 'targetState' - we can't resolve these without context
+      // So we filter them out if they're not valid state references
+      case Term.Name(name) =>
+        // Check if it looks like a valid state name (contains dots or matches state objects)
+        if (name.contains(".") || stateObjects.exists(obj => name.startsWith(obj))) {
+          Some(name)
+        } else {
+          // This is likely a variable name, not a direct state - skip it
+          None
+        }
+        
+      // If expression - we need to evaluate both branches
+      case Term.If(_, thenBranch, elseBranch) =>
+        // For if expressions, we should collect all possible states from both branches
+        // But since this is complex, let's mark it as conditional for now
+        val thenState = resolveStateExpression(thenBranch, stateObjects)
+        val elseState = resolveStateExpression(elseBranch, stateObjects)
+        
+        // For now, just return the first valid state we find
+        // TODO: In the future, we could return multiple states for conditional transitions
+        thenState.orElse(elseState)
+        
+      // Complex expressions - try string representation as fallback
+      case _ =>
+        val exprStr = expr.toString()
+        if (stateObjects.exists(obj => exprStr.contains(s"$obj."))) {
+          Some(exprStr)
+        } else {
+          None
+        }
+    }
+  }
+
   private def linksToMermaid(links: List[Link]): String = {
     if (links.isEmpty) {
       return """stateDiagram-v2
@@ -373,11 +686,14 @@ object AkkaFsmAnalyzer {
     // Get all unique states
     val allStates = links.flatMap(link => List(link.from, link.to)).distinct
     
-    // Add initial state if we have an Idle state (from any state object)
+    // Add initial state - prefer startWith detection, fallback to Idle state
+    val initialStateFromStartWith = findInitialStateFromLinks(links)
     val idleState = allStates.find(_.endsWith(".Idle"))
-    idleState.foreach { idle =>
-      val cleanIdle = cleanStateName(idle)
-      sb.append(s"    [*] --> $cleanIdle\n")
+    val initialState = initialStateFromStartWith.orElse(idleState)
+    
+    initialState.foreach { initial =>
+      val cleanInitial = cleanStateName(initial)
+      sb.append(s"    [*] --> $cleanInitial\n")
     }
     
     // Add all transitions
@@ -385,13 +701,23 @@ object AkkaFsmAnalyzer {
       val fromState = cleanStateName(link.from)
       val toState = cleanStateName(link.to)
       
+      // Build transition label
+      val label = buildTransitionLabel(link)
+      
       link.arrow match {
         case Some("recovery") =>
-          sb.append(s"    $fromState --> $toState : recovery\n")
+          sb.append(s"    $fromState --> $toState : ${label.getOrElse("recovery")}\n")
         case Some("unparsed") =>
           sb.append(s"    $fromState --> $toState : [unparsed]\n")
+        case Some("timeout") =>
+          sb.append(s"    $fromState --> $toState : ${label.getOrElse("timeout")}\n")
+        case Some("transition") =>
+          sb.append(s"    $fromState --> $toState : ${label.getOrElse("onTransition")}\n")
         case _ =>
-          sb.append(s"    $fromState --> $toState\n")
+          label match {
+            case Some(lbl) => sb.append(s"    $fromState --> $toState : $lbl\n")
+            case None => sb.append(s"    $fromState --> $toState\n")
+          }
       }
     }
     
@@ -438,6 +764,24 @@ object AkkaFsmAnalyzer {
     }
     
     sb.toString()
+  }
+  
+  private def findInitialStateFromLinks(links: List[Link]): Option[String] = {
+    // This would need to be populated during parsing when we find startWith
+    // For now, return None and rely on Idle state detection
+    None
+  }
+  
+  private def buildTransitionLabel(link: Link): Option[String] = {
+    val eventLabel = link.eventLabel
+    val isTimeout = link.isTimeout
+    
+    (eventLabel, isTimeout) match {
+      case (Some(event), true) => Some(s"$event [timeout]")
+      case (Some(event), false) => Some(event)
+      case (None, true) => Some("[timeout]")
+      case (None, false) => None
+    }
   }
   
   private def cleanStateName(state: String): String = {
