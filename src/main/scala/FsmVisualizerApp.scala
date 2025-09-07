@@ -7,6 +7,14 @@ object FsmVisualizerApp {
   
   private var analysisTimer: Option[Int] = None
   
+  // Zoom state variables
+  private var currentZoom: Double = 1.0
+  private var currentPanX: Double = 0.0
+  private var currentPanY: Double = 0.0
+  private var isDragging: Boolean = false
+  private var dragStartX: Double = 0.0
+  private var dragStartY: Double = 0.0
+  
   def main(args: Array[String]): Unit = {
     dom.document.addEventListener("DOMContentLoaded", { (_: dom.Event) =>
       setupUI()
@@ -24,6 +32,12 @@ object FsmVisualizerApp {
     val fullscreenModal = Option(document.getElementById("fullscreenModal")).map(_.asInstanceOf[dom.HTMLDivElement])
     val closeFullscreenButton = Option(document.getElementById("closeFullscreen")).map(_.asInstanceOf[dom.HTMLButtonElement])
     val fullscreenDiagram = Option(document.getElementById("fullscreenDiagram")).map(_.asInstanceOf[dom.HTMLDivElement])
+    val zoomContainer = Option(document.getElementById("zoomContainer")).map(_.asInstanceOf[dom.HTMLDivElement])
+    val zoomInButton = Option(document.getElementById("zoomIn")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val zoomOutButton = Option(document.getElementById("zoomOut")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val zoomResetButton = Option(document.getElementById("zoomReset")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val fitToScreenButton = Option(document.getElementById("fitToScreen")).map(_.asInstanceOf[dom.HTMLButtonElement])
+    val zoomLevelSpan = Option(document.getElementById("zoomLevel")).map(_.asInstanceOf[dom.HTMLSpanElement])
     val errorDiv = Option(document.getElementById("error")).map(_.asInstanceOf[dom.HTMLDivElement])
     val mermaidOutput = Option(document.getElementById("mermaidOutput")).map(_.asInstanceOf[dom.HTMLTextAreaElement])
     val diagramContainer = Option(document.getElementById("diagramContainer")).map(_.asInstanceOf[dom.HTMLDivElement])
@@ -32,6 +46,8 @@ object FsmVisualizerApp {
     if (fileInput.isEmpty || codeTextarea.isEmpty || copyButton.isEmpty || toggleButton.isEmpty || 
         exportSvgButton.isEmpty || exportPngButton.isEmpty || fullscreenButton.isEmpty ||
         fullscreenModal.isEmpty || closeFullscreenButton.isEmpty || fullscreenDiagram.isEmpty ||
+        zoomContainer.isEmpty || zoomInButton.isEmpty || zoomOutButton.isEmpty || 
+        zoomResetButton.isEmpty || fitToScreenButton.isEmpty || zoomLevelSpan.isEmpty ||
         errorDiv.isEmpty || mermaidOutput.isEmpty || diagramContainer.isEmpty) {
       println("Some DOM elements not found, retrying in 100ms...")
       dom.window.setTimeout(() => setupUI(), 100)
@@ -49,6 +65,12 @@ object FsmVisualizerApp {
     val fullscreenModalEl = fullscreenModal.get
     val closeFullscreenButtonEl = closeFullscreenButton.get
     val fullscreenDiagramEl = fullscreenDiagram.get
+    val zoomContainerEl = zoomContainer.get
+    val zoomInButtonEl = zoomInButton.get
+    val zoomOutButtonEl = zoomOutButton.get
+    val zoomResetButtonEl = zoomResetButton.get
+    val fitToScreenButtonEl = fitToScreenButton.get
+    val zoomLevelSpanEl = zoomLevelSpan.get
     val errorDivEl = errorDiv.get
     val mermaidOutputEl = mermaidOutput.get
     val diagramContainerEl = diagramContainer.get
@@ -135,7 +157,7 @@ object FsmVisualizerApp {
     
     // Fullscreen button handler
     fullscreenButtonEl.addEventListener("click", { (_: dom.Event) =>
-      showFullscreen(diagramContainerEl, fullscreenModalEl, fullscreenDiagramEl)
+      showFullscreen(diagramContainerEl, fullscreenModalEl, fullscreenDiagramEl, zoomContainerEl, zoomLevelSpanEl)
     })
     
     // Close fullscreen handler
@@ -148,6 +170,23 @@ object FsmVisualizerApp {
       if (event.target == fullscreenModalEl) {
         hideFullscreen(fullscreenModalEl)
       }
+    })
+    
+    // Zoom controls
+    zoomInButtonEl.addEventListener("click", { (_: dom.Event) =>
+      zoomIn(zoomContainerEl, zoomLevelSpanEl)
+    })
+    
+    zoomOutButtonEl.addEventListener("click", { (_: dom.Event) =>
+      zoomOut(zoomContainerEl, zoomLevelSpanEl)
+    })
+    
+    zoomResetButtonEl.addEventListener("click", { (_: dom.Event) =>
+      resetZoom(zoomContainerEl, zoomLevelSpanEl)
+    })
+    
+    fitToScreenButtonEl.addEventListener("click", { (_: dom.Event) =>
+      fitToScreen(zoomContainerEl, zoomLevelSpanEl)
     })
     
     // Initialize mermaid with retry mechanism
@@ -565,12 +604,18 @@ object FsmVisualizerApp {
     }
   }
   
-  private def showFullscreen(container: dom.HTMLDivElement, modal: dom.HTMLDivElement, fullscreenContainer: dom.HTMLDivElement): Unit = {
+  private def showFullscreen(container: dom.HTMLDivElement, modal: dom.HTMLDivElement, fullscreenContainer: dom.HTMLDivElement, zoomContainer: dom.HTMLDivElement, zoomLevelSpan: dom.HTMLSpanElement): Unit = {
     try {
       // Clone the diagram content
       val diagramContent = container.cloneNode(true).asInstanceOf[dom.HTMLDivElement]
-      fullscreenContainer.innerHTML = ""
-      fullscreenContainer.appendChild(diagramContent)
+      zoomContainer.innerHTML = ""
+      zoomContainer.appendChild(diagramContent)
+      
+      // Reset zoom state
+      resetZoom(zoomContainer, zoomLevelSpan)
+      
+      // Setup pan/drag functionality
+      setupPanAndDrag(zoomContainer)
       
       // Show the modal
       modal.style.display = "block"
@@ -591,5 +636,108 @@ object FsmVisualizerApp {
       case ex: Exception =>
         println(s"Failed to hide fullscreen: ${ex.getMessage}")
     }
+  }
+  
+  // Zoom functionality
+  private def updateTransform(container: dom.HTMLDivElement): Unit = {
+    val transform = s"scale($currentZoom) translate(${currentPanX}px, ${currentPanY}px)"
+    container.style.transform = transform
+  }
+  
+  private def updateZoomLevel(zoomLevelSpan: dom.HTMLSpanElement): Unit = {
+    val percentage = Math.round(currentZoom * 100).toInt
+    zoomLevelSpan.textContent = s"${percentage}%"
+  }
+  
+  private def zoomIn(container: dom.HTMLDivElement, zoomLevelSpan: dom.HTMLSpanElement): Unit = {
+    currentZoom = Math.min(currentZoom * 1.25, 5.0) // Max 500% zoom
+    updateTransform(container)
+    updateZoomLevel(zoomLevelSpan)
+  }
+  
+  private def zoomOut(container: dom.HTMLDivElement, zoomLevelSpan: dom.HTMLSpanElement): Unit = {
+    currentZoom = Math.max(currentZoom / 1.25, 0.1) // Min 10% zoom
+    updateTransform(container)
+    updateZoomLevel(zoomLevelSpan)
+  }
+  
+  private def resetZoom(container: dom.HTMLDivElement, zoomLevelSpan: dom.HTMLSpanElement): Unit = {
+    currentZoom = 1.0
+    currentPanX = 0.0
+    currentPanY = 0.0
+    updateTransform(container)
+    updateZoomLevel(zoomLevelSpan)
+  }
+  
+  private def fitToScreen(container: dom.HTMLDivElement, zoomLevelSpan: dom.HTMLSpanElement): Unit = {
+    try {
+      // Get the SVG element
+      val svg = container.querySelector("svg")
+      if (svg != null) {
+        val svgEl = svg.asInstanceOf[dom.SVGSVGElement]
+        val containerEl = container.parentElement
+        
+        if (containerEl != null) {
+          val containerRect = containerEl.getBoundingClientRect()
+          val svgRect = svgEl.getBoundingClientRect()
+          
+          if (svgRect.width > 0 && svgRect.height > 0) {
+            val scaleX = (containerRect.width * 0.9) / svgRect.width
+            val scaleY = (containerRect.height * 0.9) / svgRect.height
+            currentZoom = Math.min(scaleX, scaleY)
+            currentPanX = 0.0
+            currentPanY = 0.0
+            
+            updateTransform(container)
+            updateZoomLevel(zoomLevelSpan)
+          }
+        }
+      }
+    } catch {
+      case ex: Exception =>
+        println(s"Failed to fit to screen: ${ex.getMessage}")
+        // Fallback to reset zoom
+        resetZoom(container, zoomLevelSpan)
+    }
+  }
+  
+  private def setupPanAndDrag(container: dom.HTMLDivElement): Unit = {
+    // Mouse events
+    container.addEventListener("mousedown", { (e: dom.MouseEvent) =>
+      isDragging = true
+      dragStartX = e.clientX - currentPanX
+      dragStartY = e.clientY - currentPanY
+      container.classList.add("dragging")
+    })
+    
+    container.addEventListener("mousemove", { (e: dom.MouseEvent) =>
+      if (isDragging) {
+        currentPanX = e.clientX - dragStartX
+        currentPanY = e.clientY - dragStartY
+        updateTransform(container)
+      }
+    })
+    
+    container.addEventListener("mouseup", { (_: dom.MouseEvent) =>
+      isDragging = false
+      container.classList.remove("dragging")
+    })
+    
+    container.addEventListener("mouseleave", { (_: dom.MouseEvent) =>
+      isDragging = false
+      container.classList.remove("dragging")
+    })
+    
+    // Mouse wheel zoom
+    container.addEventListener("wheel", { (e: dom.WheelEvent) =>
+      e.preventDefault()
+      val zoomLevelSpan = document.getElementById("zoomLevel").asInstanceOf[dom.HTMLSpanElement]
+      
+      if (e.deltaY < 0) {
+        zoomIn(container, zoomLevelSpan)
+      } else {
+        zoomOut(container, zoomLevelSpan)
+      }
+    })
   }
 }

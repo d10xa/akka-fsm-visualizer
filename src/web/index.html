@@ -53,10 +53,24 @@
         <div class="fullscreen-content">
             <div class="fullscreen-header">
                 <h2>FSM Diagram - Fullscreen View</h2>
+                <div class="zoom-info">
+                    <span id="zoomLevel">100%</span>
+                </div>
                 <button id="closeFullscreen" class="fullscreen-close">Close</button>
             </div>
+            
+            <!-- Zoom Controls -->
+            <div class="zoom-controls">
+                <button id="zoomOut" class="zoom-btn" title="Zoom Out">−</button>
+                <button id="zoomReset" class="zoom-btn" title="Reset Zoom">⌂</button>
+                <button id="zoomIn" class="zoom-btn" title="Zoom In">+</button>
+                <button id="fitToScreen" class="zoom-btn" title="Fit to Screen">⛶</button>
+            </div>
+            
             <div id="fullscreenDiagram" class="fullscreen-diagram">
-                <!-- Diagram content will be cloned here -->
+                <div id="zoomContainer" class="zoom-container">
+                    <!-- Diagram content will be cloned here -->
+                </div>
             </div>
         </div>
     </div>
