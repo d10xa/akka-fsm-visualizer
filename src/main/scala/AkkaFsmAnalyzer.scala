@@ -268,6 +268,51 @@ object AkkaFsmAnalyzer {
               results += arg.toString()
             }
             
+          // Handle replying transitions: goto(state) replying msg
+          case Term.Apply.Initial(q"goto(..$args)", _) =>
+            args.headOption.foreach { arg =>
+              results += arg.toString()
+            }
+            
+          // Handle complex replying patterns: goto(state) replying message
+          case Term.ApplyInfix(Term.Apply.Initial(q"goto(..$args)", _), _, _, _) =>
+            args.headOption.foreach { arg =>
+              results += arg.toString()
+            }
+            
+          // Handle stay() transitions
+          case q"stay()" =>
+            if (currentState.nonEmpty) {
+              results += currentState
+            }
+            
+          // Handle stay replying
+          case Term.Apply.Initial(q"stay()", _) =>
+            if (currentState.nonEmpty) {
+              results += currentState
+            }
+            
+          case Term.ApplyInfix(q"stay()", _, _, _) =>
+            if (currentState.nonEmpty) {
+              results += currentState
+            }
+            
+          // Handle if-else constructions
+          case Term.If(condition, thenBranch, elseBranch) =>
+            // Process both branches to find all possible transitions
+            val thenResults = evalWhen(thenBranch, functions, stateObjects, currentState)
+            val elseResults = evalWhen(elseBranch, functions, stateObjects, currentState)
+            results ++= thenResults
+            results ++= elseResults
+            
+          // Handle match-case constructions
+          case Term.Match(expr, cases) =>
+            // Process all case branches to find all possible transitions
+            cases.foreach { case Case(_, _, body) =>
+              val caseResults = evalWhen(body, functions, stateObjects, currentState)
+              results ++= caseResults
+            }
+            
           case q"stopSuccess()" =>
             results += "stop"
             
