@@ -1,6 +1,7 @@
 import org.scalajs.dom
 import org.scalajs.dom.{document, console}
 import scala.scalajs.js.annotation.JSExportTopLevel
+import analyzer.AkkaFsmAnalyzer
 
 @JSExportTopLevel("FsmVisualizerApp")
 object FsmVisualizerApp {

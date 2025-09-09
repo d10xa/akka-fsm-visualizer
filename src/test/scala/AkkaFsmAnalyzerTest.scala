@@ -1,4 +1,5 @@
 import munit.FunSuite
+import analyzer.AkkaFsmAnalyzer
 
 class AkkaFsmAnalyzerTest extends FunSuite {
 

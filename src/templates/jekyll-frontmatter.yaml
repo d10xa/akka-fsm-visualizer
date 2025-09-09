@@ -1,0 +1,7 @@
+---
+layout: null
+title: "Akka FSM Visualizer"
+description: "Convert Akka FSM code to Mermaid state diagrams with live preview"
+permalink: /akka-fsm-visualizer/
+categories: [app]
+---

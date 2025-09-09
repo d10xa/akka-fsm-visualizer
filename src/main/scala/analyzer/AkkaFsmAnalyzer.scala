@@ -1,7 +1,7 @@
+package analyzer
+
 import scala.meta._
 import scala.scalajs.js.annotation.JSExportTopLevel
-
-case class Link(from: String, to: String, arrow: Option[String], eventLabel: Option[String] = None, isTimeout: Boolean = false)
 
 @JSExportTopLevel("AkkaFsmAnalyzer")
 object AkkaFsmAnalyzer {
@@ -11,7 +11,7 @@ object AkkaFsmAnalyzer {
       val input = Input.VirtualFile("fsm.scala", code)
       val tree = input.parse[meta.Source].get
       val links = eval(tree)
-      Right(linksToMermaid(links))
+      Right(MermaidGenerator.linksToMermaid(links))
     } catch {
       case ex: StackOverflowError =>
         Left(s"Stack overflow error: The FSM is too complex or has circular dependencies")
@@ -24,11 +24,11 @@ object AkkaFsmAnalyzer {
 
   private def eval(t: Tree): List[Link] = {
     // Collect all function definitions first
-    val functions = collectFunctionDefinitions(t)
+    val functions = AstTraverser.collectFunctionDefinitions(t)
     // Find all state objects (objects containing case objects extending some state trait)
-    val stateObjects = collectStateObjects(t)
+    val stateObjects = AstTraverser.collectStateObjects(t)
     // Find startWith initial state
-    val initialState = findInitialState(t, stateObjects)
+    val initialState = AstTraverser.findInitialState(t, stateObjects)
     // Find onTransition blocks
     val onTransitionLinks = findOnTransitionBlocks(t, stateObjects)
     
@@ -269,12 +269,15 @@ object AkkaFsmAnalyzer {
     }
     
     // Look for typical state-related patterns in the trait names
+    // Use string contains for simpler and more reliable matching
     val hasStatePattern = 
       treeStr.contains("State") ||
-      treeStr.matches(".*extends\\s+\\w*[Ss]tate\\w*.*") ||
-      treeStr.matches(".*extends\\s+\\w*Status.*") ||
-      treeStr.matches(".*extends\\s+\\w*Phase.*") ||
-      treeStr.matches(".*extends\\s+\\w*Step.*")
+      treeStr.contains("extends") && (
+        treeStr.contains("State") ||
+        treeStr.contains("Status") ||
+        treeStr.contains("Phase") ||
+        treeStr.contains("Step")
+      )
     
     hasStatePattern
   }
