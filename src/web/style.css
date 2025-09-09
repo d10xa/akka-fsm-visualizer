@@ -513,17 +513,35 @@ header p {
 
 /* Monaco Editor specific dark theme styling */
 [data-theme="dark"] .monaco-editor-wrapper {
-    background: var(--input-bg);
+    background: #0d1117;
     border-color: var(--border-color);
 }
 
-/* Ensure Monaco editor respects the theme */
+/* Ensure Monaco editor respects the GitHub dark theme */
 [data-theme="dark"] .monaco-editor .margin,
 [data-theme="dark"] .monaco-editor .monaco-editor-background,
 [data-theme="dark"] .monaco-editor-wrapper .monaco-editor {
-    background: var(--input-bg) !important;
-    color: var(--text-primary) !important;
+    background: #0d1117 !important;
+    color: #e6edf3 !important;
 }
+
+/* GitHub-like dark theme improvements for Monaco */
+[data-theme="dark"] .monaco-editor .current-line,
+[data-theme="dark"] .monaco-editor .view-line {
+    background: transparent !important;
+}
+
+[data-theme="dark"] .monaco-editor .selected-text {
+    background: #264f78 !important;
+}
+
+/* Syntax highlighting enhancements for dark theme */
+[data-theme="dark"] .monaco-editor .mtk1 { color: #e6edf3 !important; } /* Default text */
+[data-theme="dark"] .monaco-editor .mtk2 { color: #8b949e !important; } /* Comments */
+[data-theme="dark"] .monaco-editor .mtk3 { color: #79c0ff !important; } /* Keywords */
+[data-theme="dark"] .monaco-editor .mtk4 { color: #a5d6ff !important; } /* Strings */
+[data-theme="dark"] .monaco-editor .mtk5 { color: #79c0ff !important; } /* Numbers */
+[data-theme="dark"] .monaco-editor .mtk6 { color: #ffa657 !important; } /* Types */
 
 
 /* Textarea Editor with Line Numbers */

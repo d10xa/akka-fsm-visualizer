@@ -1278,10 +1278,57 @@ object FsmVisualizerApp {
         try {
           val monaco = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].monaco
           
+          // Define GitHub-like dark theme for better syntax highlighting
+          monaco.editor.defineTheme("github-dark", scala.scalajs.js.Dynamic.literal(
+            base = "vs-dark",
+            inherit = true,
+            rules = scala.scalajs.js.Array(
+              // Keywords (class, def, val, var, etc.) - bright blue
+              scala.scalajs.js.Dynamic.literal(token = "keyword", foreground = "79c0ff"),
+              // Strings - green
+              scala.scalajs.js.Dynamic.literal(token = "string", foreground = "a5d6ff"),
+              // Comments - gray
+              scala.scalajs.js.Dynamic.literal(token = "comment", foreground = "8b949e", fontStyle = "italic"),
+              // Numbers - light blue
+              scala.scalajs.js.Dynamic.literal(token = "number", foreground = "79c0ff"),
+              // Types and classes - yellow
+              scala.scalajs.js.Dynamic.literal(token = "type", foreground = "ffa657"),
+              // Function names - purple/pink
+              scala.scalajs.js.Dynamic.literal(token = "identifier.function", foreground = "d2a8ff"),
+              // Variables - white/light
+              scala.scalajs.js.Dynamic.literal(token = "identifier", foreground = "e6edf3"),
+              // Operators - light
+              scala.scalajs.js.Dynamic.literal(token = "delimiter", foreground = "e6edf3"),
+              // Special keywords (import, package) - pink
+              scala.scalajs.js.Dynamic.literal(token = "keyword.import", foreground = "ff7b72"),
+              scala.scalajs.js.Dynamic.literal(token = "keyword.package", foreground = "ff7b72"),
+              // Annotations (@) - yellow
+              scala.scalajs.js.Dynamic.literal(token = "annotation", foreground = "ffa657")
+            ),
+            colors = scala.scalajs.js.Dynamic.literal(
+              "editor.background" -> "#0d1117",
+              "editor.foreground" -> "#e6edf3",
+              "editorLineNumber.foreground" -> "#7d8590",
+              "editorLineNumber.activeForeground" -> "#e6edf3",
+              "editor.selectionBackground" -> "#264f78",
+              "editor.inactiveSelectionBackground" -> "#3a3d41",
+              "editorCursor.foreground" -> "#e6edf3",
+              "editor.lineHighlightBackground" -> "#161b22",
+              "editorIndentGuide.background" -> "#21262d",
+              "editorIndentGuide.activeBackground" -> "#30363d",
+              "editor.findMatchBackground" -> "#ffd33d44",
+              "editor.findMatchHighlightBackground" -> "#ffd33d22"
+            )
+          ))
+          
+          // Detect current theme
+          val isDarkTheme = dom.document.documentElement.getAttribute("data-theme") == "dark"
+          val editorTheme = if (isDarkTheme) "github-dark" else "vs"
+          
           val editor = monaco.editor.create(monacoContainer, scala.scalajs.js.Dynamic.literal(
             value = codeTextarea.value,
             language = "scala",
-            theme = "vs",
+            theme = editorTheme,
             fontSize = 13,
             fontFamily = "'Monaco', 'Menlo', 'Consolas', monospace",
             lineNumbers = "on",
@@ -1370,8 +1417,8 @@ object FsmVisualizerApp {
         try {
           val monaco = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].monaco
           if (!scala.scalajs.js.isUndefined(monaco)) {
-            // Monaco themes: vs (light), vs-dark (dark), hc-black (high contrast)
-            val monacoTheme = if (isDark) "vs-dark" else "vs"
+            // Monaco themes: vs (light), github-dark (custom dark theme)
+            val monacoTheme = if (isDark) "github-dark" else "vs"
             monaco.editor.setTheme(monacoTheme)
           }
         } catch {
