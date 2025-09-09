@@ -35,7 +35,3 @@ delete.txt
 *.bak2
 # Build outputs
 dist/
-
-# Generated files that were previously committed
-docs/*.js
-docs/*.js.map

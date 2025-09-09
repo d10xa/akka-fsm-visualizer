@@ -29,6 +29,13 @@ object FsmVisualizerApp {
   private def setupUI(): Unit = {
     val fileInput = Option(document.getElementById("fileInput")).map(_.asInstanceOf[dom.HTMLInputElement])
     val codeTextarea = Option(document.getElementById("codeInput")).map(_.asInstanceOf[dom.HTMLTextAreaElement])
+    val dropZone = Option(document.getElementById("dropZone")).map(_.asInstanceOf[dom.HTMLDivElement])
+    val toastContainer = Option(document.getElementById("toastContainer")).map(_.asInstanceOf[dom.HTMLDivElement])
+    val syntaxHighlightToggle = Option(document.getElementById("syntaxHighlight")).map(_.asInstanceOf[dom.HTMLInputElement])
+    val themeToggle = Option(document.getElementById("themeToggle")).map(_.asInstanceOf[dom.HTMLInputElement])
+    val monacoEditor = Option(document.getElementById("monacoEditor")).map(_.asInstanceOf[dom.HTMLDivElement])
+    val textareaEditor = Option(document.getElementById("textareaEditor")).map(_.asInstanceOf[dom.HTMLDivElement])
+    val lineNumbers = Option(document.getElementById("lineNumbers")).map(_.asInstanceOf[dom.HTMLDivElement])
     val copyButton = Option(document.getElementById("copyButton")).map(_.asInstanceOf[dom.HTMLButtonElement])
     val toggleButton = Option(document.getElementById("toggleSource")).map(_.asInstanceOf[dom.HTMLButtonElement])
     val exportSvgButton = Option(document.getElementById("exportSvg")).map(_.asInstanceOf[dom.HTMLButtonElement])
@@ -50,7 +57,9 @@ object FsmVisualizerApp {
     val diagramContainer = Option(document.getElementById("diagramContainer")).map(_.asInstanceOf[dom.HTMLDivElement])
     
     // Check if all required elements are present
-    if (fileInput.isEmpty || codeTextarea.isEmpty || copyButton.isEmpty || toggleButton.isEmpty || 
+    if (fileInput.isEmpty || codeTextarea.isEmpty || dropZone.isEmpty || toastContainer.isEmpty || 
+        syntaxHighlightToggle.isEmpty || themeToggle.isEmpty || monacoEditor.isEmpty || textareaEditor.isEmpty || lineNumbers.isEmpty ||
+        copyButton.isEmpty || toggleButton.isEmpty || 
         exportSvgButton.isEmpty || exportPngButton.isEmpty || fullscreenButton.isEmpty ||
         fullscreenModal.isEmpty || closeFullscreenButton.isEmpty || fullscreenDiagram.isEmpty ||
         zoomContainer.isEmpty || zoomInButton.isEmpty || zoomOutButton.isEmpty || 
@@ -65,6 +74,13 @@ object FsmVisualizerApp {
     // Extract values from Options for cleaner code
     val fileInputEl = fileInput.get
     val codeTextareaEl = codeTextarea.get
+    val dropZoneEl = dropZone.get
+    val toastContainerEl = toastContainer.get
+    val syntaxHighlightToggleEl = syntaxHighlightToggle.get
+    val themeToggleEl = themeToggle.get
+    val monacoEditorEl = monacoEditor.get
+    val textareaEditorEl = textareaEditor.get
+    val lineNumbersEl = lineNumbers.get
     val copyButtonEl = copyButton.get
     val toggleButtonEl = toggleButton.get
     val exportSvgButtonEl = exportSvgButton.get
@@ -88,18 +104,21 @@ object FsmVisualizerApp {
     // Load example code
     loadExampleCode(codeTextareaEl)
     
+    // Setup Monaco Editor
+    setupMonacoEditor(codeTextareaEl, syntaxHighlightToggleEl, monacoEditorEl, textareaEditorEl, lineNumbersEl, toastContainerEl)
+    
+    // Setup dark theme
+    setupDarkTheme(themeToggleEl, toastContainerEl)
+    
+    // Setup drag & drop functionality
+    setupDragAndDrop(dropZoneEl, codeTextareaEl, fileInputEl, mermaidOutputEl, diagramContainerEl, errorDivEl, toastContainerEl)
+    
     // File upload handler
     fileInputEl.addEventListener("change", { (_: dom.Event) =>
       val files = fileInputEl.files
       if (files.length > 0) {
         val file = files(0)
-        val reader = new dom.FileReader()
-        reader.onload = { (_: dom.Event) =>
-          codeTextareaEl.value = reader.result.asInstanceOf[String]
-          clearError(errorDivEl)
-          analyzeCode(codeTextareaEl.value, mermaidOutputEl, diagramContainerEl, errorDivEl)
-        }
-        reader.readAsText(file)
+        handleFileLoad(files(0), codeTextareaEl, mermaidOutputEl, diagramContainerEl, errorDivEl, toastContainerEl)
       }
     })
     
@@ -110,7 +129,14 @@ object FsmVisualizerApp {
       
       // Set a new timer to debounce the analysis
       val timerId = dom.window.setTimeout(() => {
-        val code = codeTextareaEl.value
+        // Get current code from Monaco Editor or textarea
+        val monacoHelper = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].monacoHelper
+        val code = if (!scala.scalajs.js.isUndefined(monacoHelper) && !scala.scalajs.js.isUndefined(monacoHelper.getCurrentCode)) {
+          monacoHelper.getCurrentCode().asInstanceOf[String]
+        } else {
+          codeTextareaEl.value
+        }
+        
         if (code.trim.nonEmpty) {
           analyzeCode(code, mermaidOutputEl, diagramContainerEl, errorDivEl)
         } else {
@@ -161,24 +187,23 @@ object FsmVisualizerApp {
     // Copy button handler
     copyButtonEl.addEventListener("click", { (_: dom.Event) =>
       mermaidOutputEl.select()
-      dom.document.execCommand("copy")
+      val success = dom.document.execCommand("copy")
       
-      // Show feedback
-      val originalText = copyButtonEl.textContent
-      copyButtonEl.textContent = "✓ Copied!"
-      dom.window.setTimeout(() => {
-        copyButtonEl.textContent = originalText
-      }, 2000)
+      if (success) {
+        showToast(toastContainerEl, "Copied!", "Mermaid code copied to clipboard", "success")
+      } else {
+        showToast(toastContainerEl, "Copy Failed", "Failed to copy to clipboard", "error")
+      }
     })
     
     // Export SVG button handler
     exportSvgButtonEl.addEventListener("click", { (_: dom.Event) =>
-      exportDiagramAsSvg(diagramContainerEl)
+      exportDiagramAsSvg(diagramContainerEl, toastContainerEl)
     })
     
     // Export PNG button handler
     exportPngButtonEl.addEventListener("click", { (_: dom.Event) =>
-      exportDiagramAsPng(diagramContainerEl)
+      exportDiagramAsPng(diagramContainerEl, toastContainerEl)
     })
     
     // Fullscreen button handler
@@ -219,7 +244,14 @@ object FsmVisualizerApp {
     regenerateButtonEl.addEventListener("click", { (_: dom.Event) =>
       if (isCodeManuallyEdited) {
         if (dom.window.confirm("This will replace your manually edited Mermaid code with a new version generated from the Scala code. Are you sure?")) {
-          regenerateMermaidCode(codeTextareaEl.value, mermaidOutputEl, diagramContainerEl, errorDivEl, regenerateButtonEl, modifiedIndicatorEl)
+          // Get current code from Monaco Editor or textarea
+          val monacoHelper = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].monacoHelper
+          val code = if (!scala.scalajs.js.isUndefined(monacoHelper) && !scala.scalajs.js.isUndefined(monacoHelper.getCurrentCode)) {
+            monacoHelper.getCurrentCode().asInstanceOf[String]
+          } else {
+            codeTextareaEl.value
+          }
+          regenerateMermaidCode(code, mermaidOutputEl, diagramContainerEl, errorDivEl, regenerateButtonEl, modifiedIndicatorEl)
         }
       }
     })
@@ -232,8 +264,17 @@ object FsmVisualizerApp {
     // Initialize mermaid with retry mechanism
     initializeMermaid()
     
+    // Keyboard shortcuts removed per user feedback
+    
     // Initial analysis with example code
-    analyzeCode(codeTextareaEl.value, mermaidOutputEl, diagramContainerEl, errorDivEl)
+    // Get current code from Monaco Editor or textarea for initial analysis
+    val monacoHelper = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].monacoHelper
+    val initialCode = if (!scala.scalajs.js.isUndefined(monacoHelper) && !scala.scalajs.js.isUndefined(monacoHelper.getCurrentCode)) {
+      monacoHelper.getCurrentCode().asInstanceOf[String]
+    } else {
+      codeTextareaEl.value
+    }
+    analyzeCode(initialCode, mermaidOutputEl, diagramContainerEl, errorDivEl)
   }
   
   private def loadExampleCode(textarea: dom.HTMLTextAreaElement): Unit = {
@@ -367,7 +408,13 @@ object FsmVisualizerApp {
       |  initialize()
       |}""".stripMargin
     
-    textarea.value = exampleCode
+    // Set content in both textarea and Monaco Editor if available
+    val monacoHelper = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].monacoHelper
+    if (!scala.scalajs.js.isUndefined(monacoHelper) && !scala.scalajs.js.isUndefined(monacoHelper.setCurrentCode)) {
+      monacoHelper.setCurrentCode(exampleCode)
+    } else {
+      textarea.value = exampleCode
+    }
   }
   
   private def analyzeCode(code: String, outputTextarea: dom.HTMLTextAreaElement, diagramContainer: dom.HTMLDivElement, errorDiv: dom.HTMLDivElement): Unit = {
@@ -449,38 +496,32 @@ object FsmVisualizerApp {
             return
           }
           
-          // Try modern API first, fallback to legacy
-          if (!scala.scalajs.js.isUndefined(mermaid.run)) {
-            // Modern async API (v10+)
-            val promise = mermaid.run(scala.scalajs.js.Dynamic.literal(
-              nodes = scala.scalajs.js.Array(currentMermaidDiv)
-            ))
-            
-            if (!scala.scalajs.js.isUndefined(promise) && !scala.scalajs.js.isUndefined(promise.`catch`)) {
-              promise.`catch`((error: scala.scalajs.js.Any) => {
-                val errorMsg = if (error != null) {
-                  try {
-                    val errorDynamic = error.asInstanceOf[scala.scalajs.js.Dynamic]
-                    if (!scala.scalajs.js.isUndefined(errorDynamic.message)) {
-                      errorDynamic.message.toString
-                    } else {
-                      error.toString
-                    }
-                  } catch {
-                    case _: Exception => error.toString
+          // Use mermaid.run() which is the standard API for v11
+          val promise = mermaid.run(scala.scalajs.js.Dynamic.literal(
+            nodes = scala.scalajs.js.Array(currentMermaidDiv)
+          ))
+          
+          if (!scala.scalajs.js.isUndefined(promise) && !scala.scalajs.js.isUndefined(promise.`catch`)) {
+            promise.`catch`((error: scala.scalajs.js.Any) => {
+              val errorMsg = if (error != null) {
+                try {
+                  val errorDynamic = error.asInstanceOf[scala.scalajs.js.Dynamic]
+                  if (!scala.scalajs.js.isUndefined(errorDynamic.message)) {
+                    errorDynamic.message.toString
+                  } else {
+                    error.toString
                   }
-                } else {
-                  "Unknown error"
+                } catch {
+                  case _: Exception => error.toString
                 }
-                println(s"Mermaid render error: $errorMsg")
-                if (container != null) {
-                  container.innerHTML = s"""<div class="error-text">Failed to render diagram: $errorMsg</div>"""
-                }
-              })
-            }
-          } else {
-            // Legacy API (v9 and below)
-            mermaid.init(scala.scalajs.js.undefined, currentMermaidDiv)
+              } else {
+                "Unknown error"
+              }
+              println(s"Mermaid render error: $errorMsg")
+              if (container != null) {
+                container.innerHTML = s"""<div class="error-text">Failed to render diagram: $errorMsg</div>"""
+              }
+            })
           }
         } catch {
           case ex: Exception =>
@@ -519,21 +560,33 @@ object FsmVisualizerApp {
         return
       }
       
-      // Reset mermaid state
-      if (!scala.scalajs.js.isUndefined(mermaid.mermaidAPI) && !scala.scalajs.js.isUndefined(mermaid.mermaidAPI.reset)) {
-        mermaid.mermaidAPI.reset()
-      }
+      // Detect current theme
+      val isDarkTheme = dom.document.documentElement.getAttribute("data-theme") == "dark"
+      val themeConfig = if (isDarkTheme) "dark" else "default"
       
       mermaid.initialize(scala.scalajs.js.Dynamic.literal(
         startOnLoad = false,
-        theme = "default",
+        theme = themeConfig,
         securityLevel = "loose",
         fontFamily = "arial",
         deterministicIds = true,
-        maxTextSize = 50000
+        maxTextSize = 50000,
+        themeVariables = if (isDarkTheme) {
+          scala.scalajs.js.Dynamic.literal(
+            background = "#2d2d2d",
+            primaryColor = "#4dabf7",
+            primaryTextColor = "#e0e0e0",
+            primaryBorderColor = "#3d3d3d",
+            lineColor = "#b0b0b0",
+            secondaryColor = "#3d3d3d",
+            tertiaryColor = "#2d2d2d"
+          )
+        } else {
+          scala.scalajs.js.undefined
+        }
       ))
       
-      println("Mermaid initialized successfully")
+      println("Mermaid v11 initialized successfully")
     } catch {
       case ex: Exception =>
         println(s"Failed to initialize Mermaid: ${ex.getMessage}")
@@ -543,7 +596,7 @@ object FsmVisualizerApp {
     }
   }
   
-  private def exportDiagramAsSvg(container: dom.HTMLDivElement): Unit = {
+  private def exportDiagramAsSvg(container: dom.HTMLDivElement, toastContainer: dom.HTMLDivElement): Unit = {
     try {
       val svgElement = container.querySelector("svg")
       if (svgElement != null) {
@@ -560,16 +613,20 @@ object FsmVisualizerApp {
         link.download = "fsm-diagram.svg"
         link.click()
         dom.URL.revokeObjectURL(url)
+        
+        // Show success toast
+        showToast(toastContainer, "SVG Exported", "Diagram exported as SVG file", "success")
       } else {
-        println("No SVG diagram found to export")
+        showToast(toastContainer, "Export Failed", "No diagram found to export", "error")
       }
     } catch {
       case ex: Exception =>
         println(s"Failed to export SVG: ${ex.getMessage}")
+        showToast(toastContainer, "Export Error", s"Failed to export SVG: ${ex.getMessage}", "error")
     }
   }
   
-  private def exportDiagramAsPng(container: dom.HTMLDivElement): Unit = {
+  private def exportDiagramAsPng(container: dom.HTMLDivElement, toastContainer: dom.HTMLDivElement): Unit = {
     try {
       val svgElement = container.querySelector("svg")
       if (svgElement != null) {
@@ -628,6 +685,7 @@ object FsmVisualizerApp {
             link.download = s"fsm-diagram-${scaleText}.png"
             link.click()
             println(s"PNG Export completed: ${canvas.width}x${canvas.height} pixels")
+            showToast(toastContainer, "PNG Exported", s"Diagram exported as ${scaleText} PNG (${canvas.width}x${canvas.height})", "success")
           })
         } else {
           // Fallback: create ultra high-resolution PNG from SVG
@@ -692,11 +750,13 @@ object FsmVisualizerApp {
               link.download = s"fsm-diagram-fallback-${scaleText}.png"
               link.click()
               println(s"PNG Fallback Export completed: ${canvas.width}x${canvas.height} pixels")
+              showToast(toastContainer, "PNG Exported", s"Diagram exported as fallback ${scaleText} PNG (${canvas.width}x${canvas.height})", "success")
             } catch {
               case ex: Exception =>
                 println(s"Canvas export failed: ${ex.getMessage}")
                 // Ultimate fallback: just download the SVG
-                exportDiagramAsSvg(container)
+                showToast(toastContainer, "PNG Export Failed", "Falling back to SVG export", "warning")
+                exportDiagramAsSvg(container, toastContainer)
             }
           }
           
@@ -704,19 +764,21 @@ object FsmVisualizerApp {
           val imgDynamic = img.asInstanceOf[scala.scalajs.js.Dynamic]
           imgDynamic.onerror = { (_: dom.Event) =>
             println("Failed to load SVG image, falling back to SVG export")
-            exportDiagramAsSvg(container)
+            showToast(toastContainer, "PNG Export Failed", "Falling back to SVG export", "warning")
+            exportDiagramAsSvg(container, toastContainer)
           }
           
           img.src = dataUrl
         }
       } else {
-        println("No SVG diagram found to export")
+        showToast(toastContainer, "Export Failed", "No diagram found to export", "error")
       }
     } catch {
       case ex: Exception =>
         println(s"Failed to export PNG: ${ex.getMessage}")
         // Fallback to SVG export
-        exportDiagramAsSvg(container)
+        showToast(toastContainer, "PNG Export Error", s"PNG export failed: ${ex.getMessage}. Trying SVG export.", "error")
+        exportDiagramAsSvg(container, toastContainer)
     }
   }
   
@@ -915,5 +977,493 @@ object FsmVisualizerApp {
     
     // Re-analyze the Scala code
     analyzeCode(scalaCode, outputTextarea, diagramContainer, errorDiv)
+  }
+  
+  // Drag & Drop functionality
+  private def setupDragAndDrop(dropZone: dom.HTMLDivElement, codeTextarea: dom.HTMLTextAreaElement, fileInput: dom.HTMLInputElement, mermaidOutput: dom.HTMLTextAreaElement, diagramContainer: dom.HTMLDivElement, errorDiv: dom.HTMLDivElement, toastContainer: dom.HTMLDivElement): Unit = {
+    val codePanel = codeTextarea.parentElement.asInstanceOf[dom.HTMLDivElement]
+    
+    // Show drop zone when textarea is empty or has only whitespace
+    def shouldShowDropZone(): Boolean = {
+      val text = codeTextarea.value.trim
+      text.isEmpty
+    }
+    
+    def toggleDropZone(forcedShow: Boolean = false): Unit = {
+      if (shouldShowDropZone() || forcedShow) {
+        dropZone.style.display = "flex"
+        if (!forcedShow) {
+          codeTextarea.style.opacity = "0.3"
+        }
+      } else {
+        dropZone.style.display = "none"
+        codeTextarea.style.opacity = "1"
+      }
+    }
+    
+    // Initial state
+    toggleDropZone()
+    
+    // Monitor textarea changes to show/hide drop zone
+    codeTextarea.addEventListener("input", { (_: dom.Event) => 
+      toggleDropZone()
+    })
+    
+    // Setup browse button
+    val browseButton = Option(document.getElementById("browseButton")).map(_.asInstanceOf[dom.HTMLDivElement])
+    browseButton.foreach { btn =>
+      btn.addEventListener("click", { (e: dom.Event) =>
+        e.preventDefault()
+        e.stopPropagation()
+        fileInput.click()
+      })
+    }
+    
+    // Drop zone click handler - focus textarea (except on browse button)
+    dropZone.addEventListener("click", { (e: dom.Event) =>
+      // Don't handle if clicking on browse button
+      if (browseButton.exists(_.contains(e.target.asInstanceOf[dom.Node]))) {
+        return
+      }
+      
+      e.preventDefault()
+      e.stopPropagation()
+      // Focus textarea and hide drop zone
+      codeTextarea.focus()
+      dropZone.style.display = "none"
+      codeTextarea.style.opacity = "1"
+    })
+    
+    // Prevent default drag behaviors
+    List("dragenter", "dragover", "dragleave", "drop").foreach { eventName =>
+      dropZone.addEventListener(eventName, { (e: dom.Event) =>
+        e.preventDefault()
+        e.stopPropagation()
+      })
+      
+      codePanel.addEventListener(eventName, { (e: dom.Event) =>
+        e.preventDefault()
+        e.stopPropagation()
+      })
+      
+      document.body.addEventListener(eventName, { (e: dom.Event) =>
+        e.preventDefault()
+        e.stopPropagation()
+      })
+    }
+    
+    // Handle drag enter/over  
+    List("dragenter", "dragover").foreach { eventName =>
+      dropZone.addEventListener(eventName, { (_: dom.Event) =>
+        dropZone.classList.add("drag-over")
+        dropZone.style.display = "flex"
+        codeTextarea.style.opacity = "0.7"  // Less opacity during drag
+      })
+      
+      // Also handle on body and code panel to show drop zone when dragging
+      document.body.addEventListener(eventName, { (e: dom.Event) =>
+        val dragEvent = e.asInstanceOf[dom.DragEvent]
+        if (dragEvent.dataTransfer != null && dragEvent.dataTransfer.types.length > 0) {
+          // Check if dragging files
+          val types = dragEvent.dataTransfer.types.asInstanceOf[scala.scalajs.js.Array[String]]
+          val hasFiles = types.indexOf("Files") >= 0
+          if (hasFiles) {
+            toggleDropZone(forcedShow = true)
+            dropZone.classList.add("drag-over")
+            codeTextarea.style.opacity = "0.7"
+          }
+        }
+      })
+    }
+    
+    // Handle drag leave
+    dropZone.addEventListener("dragleave", { (e: dom.DragEvent) =>
+      // Only remove highlight if leaving the drop zone entirely
+      if (!dropZone.contains(e.relatedTarget.asInstanceOf[dom.Node])) {
+        dropZone.classList.remove("drag-over")
+        if (!shouldShowDropZone()) {
+          dropZone.style.display = "none"
+          codeTextarea.style.opacity = "1"
+        }
+      }
+    })
+    
+    // Handle drag leave on body to hide drop zone when not dragging files anymore
+    document.body.addEventListener("dragleave", { (e: dom.DragEvent) =>
+      // Check if leaving the window entirely
+      if (e.clientX == 0 && e.clientY == 0) {
+        dropZone.classList.remove("drag-over")
+        toggleDropZone()
+      }
+    })
+    
+    // Handle file drop
+    dropZone.addEventListener("drop", { (e: dom.DragEvent) =>
+      dropZone.classList.remove("drag-over")
+      codeTextarea.style.opacity = "1" // Restore full opacity
+      
+      val files = e.dataTransfer.files
+      if (files.length > 0) {
+        val file = files(0)
+        // Validate file type
+        if (file.name.toLowerCase.endsWith(".scala")) {
+          handleFileLoad(file, codeTextarea, mermaidOutput, diagramContainer, errorDiv, toastContainer)
+        } else {
+          showToast(toastContainer, "Invalid File", "Please drop a .scala file", "error")
+        }
+      }
+      
+      // Hide drop zone after drop if content is not empty
+      toggleDropZone()
+    })
+  }
+  
+  // Unified file loading handler
+  private def handleFileLoad(file: dom.File, codeTextarea: dom.HTMLTextAreaElement, mermaidOutput: dom.HTMLTextAreaElement, diagramContainer: dom.HTMLDivElement, errorDiv: dom.HTMLDivElement, toastContainer: dom.HTMLDivElement): Unit = {
+    val reader = new dom.FileReader()
+    reader.onload = { (_: dom.Event) =>
+      val content = reader.result.asInstanceOf[String]
+      
+      // Set content in both textarea and Monaco Editor if available
+      val monacoHelper = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].monacoHelper
+      if (!scala.scalajs.js.isUndefined(monacoHelper) && !scala.scalajs.js.isUndefined(monacoHelper.setCurrentCode)) {
+        monacoHelper.setCurrentCode(content)
+      } else {
+        codeTextarea.value = content
+      }
+      
+      clearError(errorDiv)
+      analyzeCode(content, mermaidOutput, diagramContainer, errorDiv)
+      
+      // Show success feedback
+      val fileName = file.name
+      println(s"Successfully loaded file: $fileName")
+      
+      // Show toast notification
+      showToast(toastContainer, "File Loaded", s"Successfully loaded $fileName", "success")
+    }
+    
+    reader.onerror = { (_: dom.Event) =>
+      showError(errorDiv, s"Failed to read file: ${file.name}")
+    }
+    
+    reader.readAsText(file)
+  }
+  
+  // Toast notification system
+  private def showToast(toastContainer: dom.HTMLDivElement, title: String, message: String, toastType: String, duration: Int = 5000): Unit = {
+    // Create toast element
+    val toast = document.createElement("div").asInstanceOf[dom.HTMLDivElement]
+    toast.className = s"toast $toastType"
+    
+    // Get icon for toast type
+    val icon = toastType match {
+      case "success" => "✓"
+      case "error" => "✕"
+      case "warning" => "!"
+      case "info" => "i"
+      case _ => "i"
+    }
+    
+    // Create toast HTML
+    toast.innerHTML = s"""
+      <div class="toast-icon">$icon</div>
+      <div class="toast-content">
+        <p class="toast-title">$title</p>
+        <p class="toast-message">$message</p>
+      </div>
+      <button class="toast-close">×</button>
+      <div class="toast-progress"></div>
+    """
+    
+    // Add to container
+    toastContainer.appendChild(toast)
+    
+    // Show toast with animation
+    dom.window.setTimeout(() => {
+      toast.classList.add("show")
+    }, 50)
+    
+    // Setup close button
+    val closeBtn = toast.querySelector(".toast-close").asInstanceOf[dom.HTMLButtonElement]
+    closeBtn.addEventListener("click", { (_: dom.Event) =>
+      hideToast(toast)
+    })
+    
+    // Auto-hide after duration
+    dom.window.setTimeout(() => {
+      if (toast.parentNode != null) {
+        hideToast(toast)
+      }
+    }, duration)
+  }
+  
+  private def hideToast(toast: dom.HTMLDivElement): Unit = {
+    toast.classList.add("hide")
+    toast.classList.remove("show")
+    
+    // Remove from DOM after animation
+    dom.window.setTimeout(() => {
+      if (toast.parentNode != null) {
+        toast.parentNode.removeChild(toast)
+      }
+    }, 300)
+  }
+  
+  // Monaco Editor functionality
+  private def setupMonacoEditor(codeTextarea: dom.HTMLTextAreaElement, toggle: dom.HTMLInputElement, monacoContainer: dom.HTMLDivElement, textareaContainer: dom.HTMLDivElement, lineNumbers: dom.HTMLDivElement, toastContainer: dom.HTMLDivElement): Unit = {
+    var monacoEditorInstance: Option[scala.scalajs.js.Dynamic] = None
+    var isInitializing = false
+    
+    def getCurrentCode(): String = {
+      if (toggle.checked && monacoEditorInstance.isDefined) {
+        monacoEditorInstance.get.getValue().asInstanceOf[String]
+      } else {
+        codeTextarea.value
+      }
+    }
+    
+    def setCurrentCode(code: String): Unit = {
+      if (toggle.checked && monacoEditorInstance.isDefined) {
+        monacoEditorInstance.get.setValue(code)
+      } else {
+        codeTextarea.value = code
+        updateLineNumbers()
+      }
+    }
+    
+    def updateLineNumbers(): Unit = {
+      val lines = codeTextarea.value.split('\n')
+      val lineCount = lines.length
+      val lineNumbersText = (1 to lineCount).mkString("\n")
+      lineNumbers.textContent = lineNumbersText
+    }
+    
+    def setupTextareaSync(): Unit = {
+      // Update line numbers when textarea content changes
+      codeTextarea.addEventListener("input", { (_: dom.Event) =>
+        updateLineNumbers()
+      })
+      
+      // Sync scroll between textarea and line numbers
+      codeTextarea.addEventListener("scroll", { (_: dom.Event) =>
+        lineNumbers.scrollTop = codeTextarea.scrollTop
+      })
+      
+      // Initial line numbers
+      updateLineNumbers()
+    }
+    
+    def initMonacoEditor(): Unit = {
+      if (isInitializing) return
+      isInitializing = true
+      
+      val require = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].require
+      if (scala.scalajs.js.isUndefined(require)) {
+        println("Monaco loader not available")
+        toggle.checked = false
+        toggle.disabled = true
+        showToast(toastContainer, "Code Editor", "Monaco Editor failed to load", "warning")
+        isInitializing = false
+        return
+      }
+      
+      require.config(scala.scalajs.js.Dynamic.literal(
+        paths = scala.scalajs.js.Dynamic.literal(
+          vs = "https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs"
+        )
+      ))
+      
+      require(scala.scalajs.js.Array("vs/editor/editor.main"), { (_: scala.scalajs.js.Any) =>
+        try {
+          val monaco = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].monaco
+          
+          val editor = monaco.editor.create(monacoContainer, scala.scalajs.js.Dynamic.literal(
+            value = codeTextarea.value,
+            language = "scala",
+            theme = "vs",
+            fontSize = 13,
+            fontFamily = "'Monaco', 'Menlo', 'Consolas', monospace",
+            lineNumbers = "on",
+            glyphMargin = false,
+            minimap = scala.scalajs.js.Dynamic.literal(enabled = false),
+            scrollBeyondLastLine = false,
+            automaticLayout = true,
+            wordWrap = "on",
+            tabSize = 2,
+            insertSpaces = true
+          ))
+          
+          monacoEditorInstance = Some(editor)
+          
+          // Sync content changes
+          editor.onDidChangeModelContent({ (_: scala.scalajs.js.Any) =>
+            val content = editor.getValue().asInstanceOf[String]
+            codeTextarea.value = content
+            // Trigger input event for analysis
+            val event = new dom.Event("input", scala.scalajs.js.Dynamic.literal(
+              bubbles = true,
+              cancelable = true
+            ).asInstanceOf[dom.EventInit])
+            codeTextarea.dispatchEvent(event)
+          })
+          
+          isInitializing = false
+          
+        } catch {
+          case ex: Exception =>
+            println(s"Monaco initialization error: ${ex.getMessage}")
+            toggle.checked = false
+            showToast(toastContainer, "Code Editor", "Failed to initialize Monaco Editor", "error")
+            isInitializing = false
+        }
+      })
+    }
+    
+    // Toggle handler
+    toggle.addEventListener("change", { (_: dom.Event) =>
+      if (toggle.checked) {
+        if (monacoEditorInstance.isEmpty) {
+          initMonacoEditor()
+        }
+        monacoContainer.style.display = "block"
+        textareaContainer.style.display = "none"
+      } else {
+        monacoContainer.style.display = "none"
+        textareaContainer.style.display = "flex"
+        updateLineNumbers()
+      }
+    })
+    
+    // Setup textarea synchronization
+    setupTextareaSync()
+    
+    // Initial setup
+    if (toggle.checked) {
+      dom.window.setTimeout(() => initMonacoEditor(), 100)
+      textareaContainer.style.display = "none"
+    } else {
+      monacoContainer.style.display = "none"
+      textareaContainer.style.display = "flex"
+      updateLineNumbers()
+    }
+    
+    // Expose methods for drag & drop and file loading
+    dom.window.asInstanceOf[scala.scalajs.js.Dynamic].monacoHelper = scala.scalajs.js.Dynamic.literal(
+      getCurrentCode = { () => getCurrentCode() },
+      setCurrentCode = { (code: String) => setCurrentCode(code) }
+    )
+  }
+  
+  
+  // Dark theme functionality
+  private def setupDarkTheme(themeToggle: dom.HTMLInputElement, toastContainer: dom.HTMLDivElement): Unit = {
+    val STORAGE_KEY = "akka-fsm-visualizer-theme"
+    
+    def applyTheme(isDark: Boolean): Unit = {
+      val theme = if (isDark) "dark" else "light"
+      dom.document.documentElement.setAttribute("data-theme", theme)
+      
+      // Update Monaco Editor theme if available
+      val monacoHelper = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].monacoHelper
+      if (!scala.scalajs.js.isUndefined(monacoHelper)) {
+        try {
+          val monaco = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].monaco
+          if (!scala.scalajs.js.isUndefined(monaco)) {
+            // Monaco themes: vs (light), vs-dark (dark), hc-black (high contrast)
+            val monacoTheme = if (isDark) "vs-dark" else "vs"
+            monaco.editor.setTheme(monacoTheme)
+          }
+        } catch {
+          case _: Exception => // Ignore Monaco theme errors
+        }
+      }
+      
+      // Update Mermaid theme
+      try {
+        val mermaid = dom.window.asInstanceOf[scala.scalajs.js.Dynamic].mermaid
+        if (!scala.scalajs.js.isUndefined(mermaid)) {
+          val mermaidTheme = if (isDark) "dark" else "default"
+          mermaid.initialize(scala.scalajs.js.Dynamic.literal(
+            startOnLoad = false,
+            theme = mermaidTheme,
+            securityLevel = "loose",
+            fontFamily = "arial",
+            deterministicIds = true,
+            maxTextSize = 50000,
+            themeVariables = if (isDark) {
+              scala.scalajs.js.Dynamic.literal(
+                background = "#2d2d2d",
+                primaryColor = "#4dabf7",
+                primaryTextColor = "#e0e0e0",
+                primaryBorderColor = "#3d3d3d",
+                lineColor = "#b0b0b0",
+                secondaryColor = "#3d3d3d",
+                tertiaryColor = "#2d2d2d"
+              )
+            } else {
+              scala.scalajs.js.undefined
+            }
+          ))
+          
+          // Re-render existing diagrams with new theme
+          val diagramContainer = dom.document.getElementById("diagramContainer")
+          if (diagramContainer != null && diagramContainer.querySelector(".mermaid") != null) {
+            val mermaidOutput = dom.document.getElementById("mermaidOutput").asInstanceOf[dom.HTMLTextAreaElement]
+            if (mermaidOutput.value.trim.nonEmpty) {
+              renderMermaidDiagram(mermaidOutput.value, diagramContainer.asInstanceOf[dom.HTMLDivElement])
+            }
+          }
+        }
+      } catch {
+        case _: Exception => // Ignore Mermaid theme errors
+      }
+    }
+    
+    def loadTheme(): Boolean = {
+      val storage = dom.window.localStorage
+      val savedTheme = storage.getItem(STORAGE_KEY)
+      
+      savedTheme match {
+        case "dark" => true
+        case "light" => false
+        case null =>
+          // Если тема не сохранена, используем системную
+          val prefersDark = dom.window.matchMedia("(prefers-color-scheme: dark)").matches
+          prefersDark
+        case _ => false
+      }
+    }
+    
+    def saveTheme(isDark: Boolean): Unit = {
+      val storage = dom.window.localStorage
+      storage.setItem(STORAGE_KEY, if (isDark) "dark" else "light")
+    }
+    
+    // Load saved theme on startup
+    val isDark = loadTheme()
+    themeToggle.checked = isDark
+    applyTheme(isDark)
+    
+    // Theme toggle handler
+    themeToggle.addEventListener("change", { (_: dom.Event) =>
+      val newIsDark = themeToggle.checked
+      applyTheme(newIsDark)
+      saveTheme(newIsDark)
+    })
+    
+    // Listen for system theme changes (only if user hasn't set a preference)
+    val mediaQuery = dom.window.matchMedia("(prefers-color-scheme: dark)")
+    mediaQuery.addEventListener("change", { (_: dom.Event) =>
+      val storage = dom.window.localStorage
+      val savedTheme = storage.getItem(STORAGE_KEY)
+      
+      // Only auto-switch if user hasn't manually set a theme
+      if (savedTheme == null) {
+        val prefersDark = mediaQuery.matches
+        themeToggle.checked = prefersDark
+        applyTheme(prefersDark)
+      }
+    })
   }
 }

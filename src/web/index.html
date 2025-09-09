@@ -5,14 +5,27 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Akka FSM to Mermaid Converter</title>
     <link rel="stylesheet" href="style.css">
-    <script src="https://cdn.jsdelivr.net/npm/mermaid@10.6.1/dist/mermaid.min.js"></script>
+    <!-- Monaco Editor (VS Code editor) for code editing -->
+    <script src="https://cdn.jsdelivr.net/npm/monaco-editor@0.44.0/min/vs/loader.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mermaid@11.0.0/dist/mermaid.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/html2canvas@1.4.1/dist/html2canvas.min.js"></script>
 </head>
 <body>
     <div class="container">
         <header>
-            <h1>Akka FSM Visualizer</h1>
-            <p>Convert Akka FSM code to Mermaid state diagrams</p>
+            <div class="header-content">
+                <div class="header-text">
+                    <h1>Akka FSM Visualizer</h1>
+                    <p>Convert Akka FSM code to Mermaid state diagrams</p>
+                </div>
+                <div class="header-controls">
+                    <label class="theme-toggle">
+                        <input type="checkbox" id="themeToggle">
+                        <span class="toggle-slider"></span>
+                        <span class="toggle-label">🌙 Dark</span>
+                    </label>
+                </div>
+            </div>
         </header>
 
         <div class="controls">
@@ -27,8 +40,39 @@
 
         <div class="content">
             <div class="panel code-panel">
-                <h3>Scala Code</h3>
-                <textarea id="codeInput" placeholder="Paste your Akka FSM code here..."></textarea>
+                <div class="panel-header">
+                    <h3>Scala Code</h3>
+                    <div class="code-controls">
+                        <label class="syntax-toggle">
+                            <input type="checkbox" id="syntaxHighlight" checked>
+                            <span class="toggle-text">Monaco Editor (VS Code)</span>
+                        </label>
+                    </div>
+                </div>
+                <!-- Drag & Drop Zone -->
+                <div id="dropZone" class="drop-zone" style="display: none;">
+                    <div class="drop-zone-content">
+                        <svg class="drop-zone-icon" width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                            <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                            <polyline points="14,2 14,8 20,8"></polyline>
+                            <line x1="16" y1="13" x2="8" y2="13"></line>
+                            <line x1="16" y1="17" x2="8" y2="17"></line>
+                            <polyline points="10,9 9,9 8,9"></polyline>
+                        </svg>
+                        <p class="drop-zone-text">Drop .scala file here</p>
+                        <p class="drop-zone-subtext">Supports Akka FSM .scala files</p>
+                        <div id="browseButton" class="drop-zone-file-action">📁 Browse Files</div>
+                        <div class="drop-zone-click-hint">or click anywhere to start typing</div>
+                    </div>
+                </div>
+                <!-- Code Editor Container -->
+                <div class="code-editor-container">
+                    <div id="monacoEditor" class="monaco-editor-wrapper"></div>
+                    <div id="textareaEditor" class="textarea-editor-wrapper" style="display: none;">
+                        <div id="lineNumbers" class="line-numbers"></div>
+                        <textarea id="codeInput" placeholder="Paste your Akka FSM code here..."></textarea>
+                    </div>
+                </div>
             </div>
             
             <div class="panel diagram-panel">
@@ -78,6 +122,9 @@
             </div>
         </div>
     </div>
+
+    <!-- Toast Notifications Container -->
+    <div id="toastContainer" class="toast-container"></div>
 
     <script type="text/javascript" src="akka-fsm-visualizer-fastopt.js"></script>
 </body>
