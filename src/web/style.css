@@ -637,18 +637,32 @@ header p {
 
 #mermaidOutput:focus {
     outline: none;
-    border-color: #fd7e14;
-    background: #fff;
+    border-color: var(--button-regenerate);
+    background: var(--input-bg);
     box-shadow: 0 0 0 3px rgba(253, 126, 20, 0.1);
+}
+
+/* Dark theme support for focused state */
+[data-theme="dark"] #mermaidOutput:focus {
+    background: var(--input-bg) !important;
+    box-shadow: 0 0 0 3px rgba(255, 140, 66, 0.2);
 }
 
 #mermaidOutput.modified {
     border-left: 4px solid var(--button-regenerate);
 }
 
+/* Dark theme support for Mermaid output textarea */
+[data-theme="dark"] #mermaidOutput {
+    background: var(--input-bg) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
+}
+
 /* Dark theme support for modified state */
 [data-theme="dark"] #mermaidOutput.modified {
-    background: rgba(255, 140, 66, 0.1);
+    background: rgba(255, 140, 66, 0.1) !important;
+    color: var(--text-primary) !important;
 }
 
 [data-theme="light"] #mermaidOutput.modified {
@@ -657,6 +671,13 @@ header p {
 
 .mermaid-source {
     display: none;
+}
+
+/* Dark theme support for mermaid source when visible */
+[data-theme="dark"] .mermaid-source {
+    background: var(--input-bg) !important;
+    color: var(--text-primary) !important;
+    border-color: var(--border-color) !important;
 }
 
 .diagram-display {
