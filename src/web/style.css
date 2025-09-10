@@ -58,7 +58,7 @@
     --panel-bg: #2d2d2d;
     --panel-header-bg: #3d3d3d;
     --diagram-bg: #2d2d2d;
-    --line-numbers-bg: #3d3d3d;
+    --line-numbers-bg: #000000;
     --line-numbers-color: #909090;
     --textarea-bg: transparent;
     --shadow-light: rgba(0, 0, 0, 0.3);
